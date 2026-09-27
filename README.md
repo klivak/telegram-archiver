@@ -22,7 +22,7 @@ Local open-source archiver for your own Telegram account: private and personal c
 
 ## Quick start
 1. Get `api_id` and `api_hash` at https://my.telegram.org -> API development tools.
-2. Download a release or build locally, run `TelegramArchiver.exe`.
+2. Download a release and run `TelegramArchiver.exe`, or from source just double-click `start.bat` (installs uv and builds the UI on first run).
 3. Paste credentials -> scan the QR code in Telegram (Settings -> Devices -> Link Desktop Device).
 4. Select chats -> "Export".
 
