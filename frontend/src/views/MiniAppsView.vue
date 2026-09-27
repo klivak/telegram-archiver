@@ -32,7 +32,13 @@ const drawer = ref<MiniApp | null>(null)
 const snapshots = ref<Snapshot[]>([])
 const states = ref<{ snap: Snapshot; list: State[] } | null>(null)
 const autoModal = ref<MiniApp | null>(null)
-const auto = ref({ max_depth: 2, max_clicks: 30, video: false })
+const PRESETS = { full: { max_depth: 4, max_clicks: 400 }, quick: { max_depth: 2, max_clicks: 30 } } as const
+const preset = ref<'full' | 'quick' | 'custom'>('full')
+const auto = ref({ max_depth: 4, max_clicks: 400, video: false })
+function pickPreset(k: 'full' | 'quick') {
+  preset.value = k
+  auto.value = { ...auto.value, ...PRESETS[k] }
+}
 
 const loaded = ref(false)
 async function load() {
@@ -194,10 +200,19 @@ onBeforeUnmount(() => off?.())
     </div>
 
     <NModal :show="!!autoModal" preset="card" :title="t('miniapps.autoCrawl')" style="width: 460px" @update:show="(v: boolean) => !v && (autoModal = null)">
+      <div class="presets">
+        <button type="button" class="preset" :class="{ on: preset === 'full' }" @click="pickPreset('full')">
+          <strong>🌐 {{ t('miniapps.presetFull') }}</strong><span class="small muted">{{ t('miniapps.presetFullHint') }}</span>
+        </button>
+        <button type="button" class="preset" :class="{ on: preset === 'quick' }" @click="pickPreset('quick')">
+          <strong>⚡ {{ t('miniapps.presetQuick') }}</strong><span class="small muted">{{ t('miniapps.presetQuickHint') }}</span>
+        </button>
+      </div>
       <p class="small">{{ t('miniapps.autoText') }}</p>
+      <p class="small muted">{{ t('miniapps.autoResult') }}</p>
       <NSpace vertical>
-        <div class="row"><span class="grow">{{ t('miniapps.maxDepth') }}</span><NInputNumber v-model:value="auto.max_depth" :min="1" :max="5" style="width: 110px" /></div>
-        <div class="row"><span class="grow">{{ t('miniapps.maxClicks') }}</span><NInputNumber v-model:value="auto.max_clicks" :min="1" :max="200" style="width: 110px" /></div>
+        <div class="row"><span class="grow">{{ t('miniapps.maxDepth') }}</span><NInputNumber v-model:value="auto.max_depth" :min="1" :max="8" style="width: 110px" @update:value="preset = 'custom'" /></div>
+        <div class="row"><span class="grow">{{ t('miniapps.maxClicks') }}</span><NInputNumber v-model:value="auto.max_clicks" :min="1" :max="2000" style="width: 110px" @update:value="preset = 'custom'" /></div>
         <div class="row"><span class="grow">{{ t('miniapps.video') }}</span><NSwitch v-model:value="auto.video" /></div>
       </NSpace>
       <NButton type="primary" block style="margin-top: 14px" @click="autoModal && open(autoModal, 'auto')">{{ t('miniapps.startCrawl') }}</NButton>
@@ -211,6 +226,8 @@ onBeforeUnmount(() => off?.())
             <span class="icon-chip sm">{{ s.mode === 'auto' ? '🤖' : '▶' }}</span>
             <span class="grow">{{ s.created_at.slice(0, 16).replace('T', ' ') }} · {{ t(`miniapps.mode.${s.mode}`) }} · {{ t('miniapps.states', { n: s.states }) }}</span>
             <NButton size="small" @click="showStates(s)">{{ t('common.open') }}</NButton>
+            <NButton size="small" quaternary :title="t('miniapps.siteText')" @click="openFolder(s.path + '/site.md')">📄</NButton>
+            <NButton size="small" quaternary :title="t('miniapps.siteIndex')" @click="openFolder(s.path + '/index.html')">🌐</NButton>
             <NButton size="small" quaternary :title="s.path" @click="openFolder(s.path)">📂</NButton>
             <NButton size="small" quaternary :disabled="!app.modules.playwright" @click="replay(s)">⟲ {{ t('miniapps.replay') }}</NButton>
           </div>
@@ -377,4 +394,8 @@ onBeforeUnmount(() => off?.())
     position: static;
   }
 }
+.presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+.preset { font: inherit; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text); cursor: pointer; transition: all var(--dur) var(--ease); }
+.preset:hover { border-color: var(--border-strong); }
+.preset.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
 </style>

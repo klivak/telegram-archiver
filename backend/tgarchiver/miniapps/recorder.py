@@ -67,6 +67,7 @@ class Session:
         self.states = 0
         self.hashes: set[str] = set()
         self.events: list[dict[str, Any]] = []
+        self.pages: list[dict[str, str]] = []  # readable text of every saved state, for site.md / index.html
         self._lock = asyncio.Lock()
 
     async def snapshot(self, page: Any, context: Any, label: str = "") -> bool:
@@ -96,10 +97,53 @@ class Session:
                 await cdp.detach()
             except Exception as e:  # noqa: BLE001
                 log.info("mhtml failed: %s", type(e).__name__)
+            clean_url = strip_init_data(page.url)
             (d / f"{n}.json").write_text(json.dumps(
-                {"url": strip_init_data(page.url), "label": label, "at": now_iso()}, ensure_ascii=False),
+                {"url": clean_url, "label": label, "at": now_iso()}, ensure_ascii=False),
                 encoding="utf-8")
+            try:
+                title, text = await page.evaluate(
+                    "() => [document.title || '', document.body ? document.body.innerText : '']")
+            except Exception:  # noqa: BLE001
+                title, text = "", ""
+            text = re.sub(r"\n{3,}", "\n\n", (text or "").strip())
+            (d / f"{n}.md").write_text(f"# {title or label or n}\n\n> {clean_url}\n\n{text}\n", encoding="utf-8")
+            self.pages.append({"n": n, "title": title or label or n, "label": label, "url": clean_url, "text": text})
             return True
+
+    def write_site(self) -> None:
+        """One readable file with the text of every page (site.md) and an offline index.html."""
+        import html as _html
+
+        if not self.pages:
+            return
+        seen: set[str] = set()
+        md = ["# Mini App - saved pages", ""]
+        cards = []
+        for pg in self.pages:
+            key = hashlib.sha1(pg["text"].encode("utf-8", "ignore")).hexdigest()
+            dup = key in seen
+            seen.add(key)
+            if not dup and pg["text"]:
+                md += [f"## {pg['n']} · {pg['title']}", "", f"> {pg['url']}" + (f" · {pg['label']}" if pg["label"] else ""),
+                       "", pg["text"], "", "---", ""]
+            n = pg["n"]
+            cards.append(
+                f'<section id="s{n}"><h2>{n} · {_html.escape(pg["title"])}</h2>'
+                f'<p class="u">{_html.escape(pg["url"])}</p>'
+                f'<p><a href="states/{n}.mhtml">MHTML</a> · <a href="states/{n}.html">HTML</a> · '
+                f'<a href="states/{n}.md">text</a></p>'
+                f'<a href="states/{n}.png"><img src="states/{n}.png" loading="lazy"></a>'
+                f'<pre>{_html.escape(pg["text"][:20000]) if not dup else "(same text as an earlier page)"}</pre></section>')
+        (self.out / "site.md").write_text("\n".join(md), encoding="utf-8")
+        toc = "".join(f'<li><a href="#s{p["n"]}">{p["n"]} · {_html.escape(p["title"])}</a></li>' for p in self.pages)
+        (self.out / "index.html").write_text(
+            "<!doctype html><meta charset=utf-8><title>Mini App</title><style>"
+            "body{font:14px system-ui;max-width:980px;margin:24px auto;padding:0 16px;background:#0f1115;color:#e6e6e6}"
+            "a{color:#2aabee}section{border-top:1px solid #333;padding:16px 0}img{max-width:360px;border-radius:8px}"
+            "pre{white-space:pre-wrap;background:#171a21;padding:12px;border-radius:8px}.u{color:#888;font-size:12px}"
+            f"</style><h1>Mini App - {len(self.pages)} pages</h1><ol>{toc}</ol>{''.join(cards)}",
+            encoding="utf-8")
 
 
 async def _clickables(page: Any) -> list[dict[str, Any]]:
@@ -191,7 +235,7 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
     profile = svc.account_dir / "mini_apps" / bot / f"profile_{name}"
     sess = Session(out)
     started = time.monotonic()
-    duration = int(p.get("duration_s") or (900 if mode == "manual" else 300))
+    duration = int(p.get("duration_s") or (900 if mode == "manual" else 1800))
     await ctx.progress(stage="open", states=0, force=True)
     dns_args = await resolver_args(url)
     async with async_playwright() as pw:
@@ -246,6 +290,7 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
                 await context.close()
             except Exception as e:  # noqa: BLE001
                 log.info("browser context close: %s", type(e).__name__)
+    sess.write_site()
     meta = {"bot": app["bot_username"], "app": app["short_name"], "kind": app["kind"], "url": strip_init_data(url),
             "mode": mode, "states": sess.states, "events": sess.events[-200:], "created_at": now_iso(),
             "warning": "session.har and trace.zip may contain tokens and cookies - keep them private."}
@@ -257,9 +302,63 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
     return {"snapshot_id": snap_id, "states": sess.states, "path": str(out)}
 
 
+UNSAFE_LINK = re.compile(r"pay|checkout|invoice|wallet|logout|log-out|signout|delete|remove|subscribe|buy|purchase|"
+                         r"order|withdraw|transfer|donate|oplat|оплат|купи", re.I)
+
+
+def _norm(url: str) -> str:
+    return strip_init_data(url).rstrip("/")
+
+
+async def _same_origin_links(page: Any) -> list[str]:
+    return await page.evaluate(r"""() => {
+      const out = new Set();
+      for (const a of document.querySelectorAll('a[href]')) {
+        const raw = a.getAttribute('href') || '';
+        if (!raw || raw.startsWith('javascript:')) continue;
+        let u; try { u = new URL(raw, location.href); } catch (e) { continue; }
+        if (u.origin !== location.origin) continue;
+        out.add(u.href);
+      }
+      return [...out];
+    }""")
+
+
+async def _crawl_links(page: Any, context: Any, sess: Session, ctx: JobContext, start_url: str, budget: int,
+                       started: float, duration: int) -> int:
+    """Visit every same-origin page link (GET navigation only, nothing is clicked). Returns pages visited."""
+    visited = {_norm(start_url)}
+    queue = [u for u in await _same_origin_links(page)]
+    n = 0
+    while queue and n < budget and time.monotonic() - started < duration:
+        await ctx.check()
+        url = queue.pop(0)
+        key = _norm(url)
+        if key in visited or UNSAFE_LINK.search(url.split("#tgWebAppData")[0]):
+            continue
+        visited.add(key)
+        try:
+            # in-page navigation keeps the Telegram init data the app stored on first load
+            await page.evaluate("u => { location.href = u }", url)
+            await page.wait_for_load_state("domcontentloaded", timeout=15_000)
+        except Exception:  # noqa: BLE001
+            continue
+        await asyncio.sleep(0.6)  # gentle pace
+        n += 1
+        await sess.snapshot(page, context, f"link {key.rsplit('/', 1)[-1] or '/'}")
+        try:
+            queue += [u for u in await _same_origin_links(page) if _norm(u) not in visited]
+        except Exception:  # noqa: BLE001
+            pass
+        await ctx.progress(stage="crawl", states=sess.states, clicks=n)
+    return n
+
+
 async def _auto_crawl(page: Any, context: Any, sess: Session, ctx: JobContext, start_url: str, max_depth: int,
                       max_clicks: int, started: float, duration: int) -> None:
-    """Breadth-first walk over safe clickable elements; returns to the start URL and replays the path per click."""
+    """Links first (cheap, safe), then a breadth-first walk over safe clickable elements; the click walk returns to
+    the start URL and replays the path per click."""
+    max_clicks -= await _crawl_links(page, context, sess, ctx, start_url, max_clicks, started, duration)
     queue: list[list[str]] = [[]]
     clicks = 0
     seen_paths: set[tuple[str, ...]] = set()

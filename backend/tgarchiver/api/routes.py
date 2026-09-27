@@ -764,8 +764,8 @@ async def detect_miniapps(request: Request) -> dict[str, Any]:
 
 class MiniAppOpenIn(BaseModel):
     mode: str = Field("manual", pattern=r"^(manual|auto)$")
-    max_depth: int = 2
-    max_clicks: int = 30
+    max_depth: int = Field(3, ge=1, le=8)
+    max_clicks: int = Field(300, ge=1, le=2000)
     duration_s: int = 0
     start_param: str | None = None
     video: bool = False
