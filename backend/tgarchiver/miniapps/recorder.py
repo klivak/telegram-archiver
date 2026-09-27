@@ -236,9 +236,16 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
                         await sess.snapshot(page, context, "manual")
             if pending:
                 await asyncio.gather(*pending, return_exceptions=True)
-            await context.tracing.stop(path=str(out / "trace.zip"))
+            try:
+                await context.tracing.stop(path=str(out / "trace.zip"))
+            except Exception as e:  # noqa: BLE001
+                # closing the window can drop screencast frames the trace refers to; the snapshots are already saved
+                log.warning("mini app trace not saved: %s", type(e).__name__)
         finally:
-            await context.close()
+            try:
+                await context.close()
+            except Exception as e:  # noqa: BLE001
+                log.info("browser context close: %s", type(e).__name__)
     meta = {"bot": app["bot_username"], "app": app["short_name"], "kind": app["kind"], "url": strip_init_data(url),
             "mode": mode, "states": sess.states, "events": sess.events[-200:], "created_at": now_iso(),
             "warning": "session.har and trace.zip may contain tokens and cookies - keep them private."}
