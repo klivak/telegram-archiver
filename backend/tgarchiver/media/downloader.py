@@ -7,6 +7,7 @@ import errno
 import hashlib
 import logging
 import os
+import random
 import shutil
 import time
 from datetime import datetime
@@ -299,7 +300,7 @@ class MediaQueue:
         await self.svc.db.execute(
             "UPDATE media SET status=?, attempts=?, error=?, updated_at=? WHERE id=? AND status='downloading'",
             ("failed" if final else "pending", attempts, f"{type(e).__name__}: {e}"[:300], now_iso(), r["id"]))
-        return 0.0 if final else float(min(2 ** attempts, 30))
+        return 0.0 if final else float(min(2 ** attempts, 30)) + random.uniform(0, 3)
 
     async def _download_one(self, client: Any, peer: Any, chat: dict[str, Any], r: dict[str, Any],
                             msg: Any) -> None:

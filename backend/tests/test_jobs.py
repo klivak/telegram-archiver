@@ -41,7 +41,10 @@ async def test_cancel(svc: Services) -> None:
     assert job["status"] == "cancelled"
 
 
-async def test_flood_wait_is_respected_and_auto_resumes(svc: Services) -> None:
+async def test_flood_wait_is_respected_and_auto_resumes(svc: Services, monkeypatch) -> None:
+    from tgarchiver.jobs import engine as engine_mod
+
+    monkeypatch.setattr(engine_mod, "jitter", lambda s, **_: s)  # the random margin is tested separately
     calls: list[float] = []
 
     async def flaky(ctx: JobContext) -> str:
@@ -104,3 +107,11 @@ async def test_restart_requeues_running(svc: Services) -> None:
     assert job and job["status"] == "queued"
     await svc.engine.start()
     await svc.engine.cancel(jid)
+
+
+def test_jitter_only_lengthens_and_varies() -> None:
+    from tgarchiver.jobs.engine import jitter
+
+    vals = [jitter(30, spread=0.1, extra=10) for _ in range(200)]
+    assert all(30 <= v <= 30 + 3 + 10 for v in vals)
+    assert len({round(v, 3) for v in vals}) > 50

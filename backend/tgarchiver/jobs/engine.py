@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
@@ -18,6 +19,11 @@ from tgarchiver.core.db import Database, dumps, loads, now_iso
 from tgarchiver.core.events import EventBus
 
 log = logging.getLogger(__name__)
+
+def jitter(seconds: float, spread: float = 0.2, extra: float = 3.0) -> float:
+    """Add a random margin so waits and retries are not machine-regular. Only ever lengthens the wait."""
+    return seconds + random.uniform(0, seconds * spread + extra)
+
 
 ACTIVE = ("queued", "running", "flood_wait")
 FINAL = ("done", "failed", "cancelled")
@@ -329,7 +335,8 @@ class JobEngine:
                 await ctx.progress(force=True)
                 await self._set_status(ctx.id, "cancelled")
             except FloodWait as fw:
-                until = datetime.now(UTC) + timedelta(seconds=fw.seconds + 1)
+                # never resume earlier than Telegram asked; a random extra margin avoids a burst right at the boundary
+                until = datetime.now(UTC) + timedelta(seconds=jitter(fw.seconds + 1, spread=0.1, extra=10))
                 await ctx.progress(force=True, flood_wait=fw.seconds, flood_until=until.isoformat(), flood_what=fw.what)
                 await self._set_status(ctx.id, "flood_wait", wait_until=until.isoformat(timespec="seconds"))
                 self.bus.emit("flood_wait", {"job_id": ctx.id, "seconds": fw.seconds, "until": until.isoformat()})
@@ -357,7 +364,7 @@ class JobEngine:
         if attempts > self.max_retries:
             await self._set_status(ctx.id, "failed", error=err, attempts=attempts)
             return
-        delay = min(2 ** (attempts - 1), 300)
+        delay = round(jitter(min(2 ** (attempts - 1), 300), spread=0.3, extra=1))
         until = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat(timespec="seconds")
         log.warning("job %s transient error, retry %s in %ss: %s", ctx.id, attempts, delay, type(e).__name__)
         await self._set_status(ctx.id, "queued", error=err, attempts=attempts, wait_until=until)

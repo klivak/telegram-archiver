@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import platform
+import random
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
@@ -28,9 +29,10 @@ API_HASH_KEY = "api_hash"
 class RateLimiter:
     """Token bucket shared by every history/API request of the account."""
 
-    def __init__(self, rate: float, burst: int = 3) -> None:
+    def __init__(self, rate: float, burst: int = 3, jitter: float = 0.5) -> None:
         self.rate = max(rate, 0.05)
         self.burst = burst
+        self.jitter = jitter  # random extra pause (fraction of the base interval) so request timing is not robotic
         self.tokens = float(burst)
         self.updated = time.monotonic()
         self._lock = asyncio.Lock()
@@ -43,6 +45,8 @@ class RateLimiter:
                 self.updated = now
                 if self.tokens >= 1:
                     self.tokens -= 1
+                    if self.jitter:
+                        await asyncio.sleep(random.uniform(0, self.jitter / self.rate))
                     return
                 await asyncio.sleep((1 - self.tokens) / self.rate)
 
