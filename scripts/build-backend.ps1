@@ -19,7 +19,7 @@ Push-Location $backend
 try {
     uv sync --no-dev
     if ($Tool -eq 'nuitka') {
-        $icon = Join-Path $root 'docs\assets\icon.ico'
+        $icon = Join-Path $root 'assets\icon.ico'
         $iconArg = if (Test-Path $icon) { "--windows-icon-from-ico=$icon" } else { $null }
         $nuitkaArgs = @(
             '--standalone', '--onefile', '--assume-yes-for-downloads',
