@@ -287,3 +287,27 @@ async def test_export_downloads_only_its_types_and_cancel_dequeues(svc: Services
     finally:
         export_mod._export = orig
     assert await svc.db.scalar("SELECT status FROM media WHERE message_id=1") == "available"
+
+
+async def test_export_follows_group_migration_to_old_history(svc: Services) -> None:
+    await add_chat(svc, chat_id=-1003000000001, title="New", type_="forum")
+    old_msgs = [make_msg(i, peer=types.PeerChat(777), text=f"old {i}") for i in range(1, 6)]
+    from conftest import BASE
+
+    migrate = types.MessageService(id=1, peer_id=types.PeerChannel(3000000001), date=BASE,
+                                   action=types.MessageActionChannelMigrateFrom(title="Old group", chat_id=777))
+    new_msgs = [migrate] + [make_msg(i, peer=types.PeerChannel(3000000001), text=f"new {i}")
+                                            for i in range(2, 4)]
+
+    class Client(FakeClient):
+        async def get_messages(self, peer, *a, **k):  # type: ignore[no-untyped-def]
+            self.messages = old_msgs if isinstance(peer, types.InputPeerChat) else new_msgs
+            return await super().get_messages(peer, *a, **k)
+
+    use_client(svc, Client(new_msgs, {}))
+    job = await svc.engine.wait(await svc.engine.submit("export", {
+        "chat_ids": [-1003000000001], "formats": ["md"], "no_media": True}), timeout=60)
+    assert job["status"] == "done", job
+    old = await svc.db.fetchone("SELECT * FROM chats WHERE id=-777")
+    assert old and old["title"] == "Old group" and old["linked_chat_id"] == -1003000000001
+    assert await svc.db.scalar("SELECT count(*) FROM messages WHERE chat_id=-777") == 5

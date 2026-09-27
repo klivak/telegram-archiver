@@ -13,7 +13,7 @@ from telethon import errors
 from tgarchiver.export.exporter import Exporter, export_full_file
 from tgarchiver.jobs.engine import FloodWait, JobCancelled, JobContext
 from tgarchiver.media.downloader import MediaQueue, enqueue
-from tgarchiver.sync.history import get_chat, sync_chat_history
+from tgarchiver.sync.history import get_chat, migrated_from_chat, sync_chat_history
 
 if TYPE_CHECKING:
     from tgarchiver.services import Services
@@ -40,7 +40,7 @@ async def export_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
 
 async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
     p = ctx.params
-    chat_ids: list[int] = [int(c) for c in p.get("chat_ids", [])]
+    chat_ids: list[int] = [int(c) for c in (ctx.checkpoint.get("chat_ids") or p.get("chat_ids", []))]
     formats: list[str] = p.get("formats") or [p.get("format") or "md"]
     split: dict[str, Any] = p.get("split") or {"mode": "month"}
     media_types: list[str] = [] if p.get("no_media") else list(p.get("media_types") or [])
@@ -62,7 +62,9 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
                 except errors.TakeoutInitDelayError as e:
                     # Telegram asked to confirm the export in the "Telegram" service chat.
                     raise FloodWait(e.seconds, "takeout") from e
-            for i in range(start, len(chat_ids)):
+            i = start - 1
+            while i + 1 < len(chat_ids):
+                i += 1
                 chat = await get_chat(svc, chat_ids[i])
                 prefix = {"chats_done": i, "chats_total": len(chat_ids), "chat_title": chat["title"]}
                 await ctx.progress(**prefix, stage="messages", force=True)
@@ -91,6 +93,10 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
                         media_task.cancel()
                         with contextlib.suppress(asyncio.CancelledError, Exception):
                             await media_task
+                old = await migrated_from_chat(svc, chat["id"])
+                if old and old not in chat_ids:
+                    chat_ids.insert(i + 1, old)  # the old group holds the history from before the upgrade
+                    await ctx.save_checkpoint(chat_ids=chat_ids)
                 await ctx.progress(stage="render", force=True)
                 for fmt in formats:
                     await Exporter(svc, chat, fmt, split, opts).run(ctx)

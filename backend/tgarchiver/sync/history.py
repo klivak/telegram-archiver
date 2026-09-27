@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime
@@ -194,6 +195,34 @@ async def chat_preview_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
     return {"fetched": len(batch)}
 
 
+async def migrated_from_chat(svc: Services, chat_id: int) -> int | None:
+    """Supergroup created by upgrading an old group: return the old group's chat id (its history lives there).
+
+    Telegram keeps everything before the upgrade in the old basic group and hides it from the dialog list, so the
+    archiver registers it as its own chat and syncs/exports it together with the new one.
+    """
+    row = await svc.db.fetchone(
+        "SELECT raw FROM messages WHERE chat_id=? AND service_action='ChannelMigrateFrom' ORDER BY id LIMIT 1",
+        (chat_id,))
+    if not row or not row["raw"]:
+        return None
+    try:
+        action = (json.loads(row["raw"]) or {}).get("action") or {}
+        old = int(action.get("chat_id") or 0)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    if not old:
+        return None
+    old_id = -old  # marked id of a basic group
+    title = action.get("title") or "?"
+    new = await svc.db.fetchone("SELECT account_id FROM chats WHERE id=?", (chat_id,))
+    await svc.db.execute(
+        "INSERT INTO chats(id, account_id, access_hash, type, title, linked_chat_id, updated_at) "
+        "VALUES(?,?,0,'group',?,?,?) ON CONFLICT(id) DO UPDATE SET linked_chat_id=excluded.linked_chat_id",
+        (old_id, new["account_id"] if new else None, title, chat_id, now_iso()))
+    return old_id
+
+
 async def refresh_chat_counters(svc: Services, chat_id: int) -> None:
     await svc.db.execute(
         "UPDATE chats SET stored_messages=(SELECT count(*) FROM messages WHERE chat_id=?), "
@@ -203,13 +232,18 @@ async def refresh_chat_counters(svc: Services, chat_id: int) -> None:
 
 
 async def sync_history_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
-    chat_ids: list[int] = list(ctx.params.get("chat_ids", []))
+    chat_ids: list[int] = list(ctx.checkpoint.get("chat_ids") or ctx.params.get("chat_ids", []))
     start = int(ctx.checkpoint.get("index", 0))
     total_new = int(ctx.checkpoint.get("fetched", 0))
-    for i in range(start, len(chat_ids)):
+    i = start
+    while i < len(chat_ids):
         await ctx.progress(chats_done=i, chats_total=len(chat_ids), force=True)
         total_new += await sync_chat_history(svc, ctx, chat_ids[i])
-        await ctx.save_checkpoint(index=i + 1, fetched=total_new)
+        old = await migrated_from_chat(svc, chat_ids[i])
+        if old and old not in chat_ids:
+            chat_ids.insert(i + 1, old)  # history from before the group was upgraded
+        i += 1
+        await ctx.save_checkpoint(index=i, fetched=total_new, chat_ids=chat_ids)
     await ctx.progress(chats_done=len(chat_ids), chats_total=len(chat_ids), force=True)
     svc.bus.emit("chats.changed")
     return {"fetched": total_new}

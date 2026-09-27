@@ -143,6 +143,7 @@ class MediaQueue:
         # so one failing file never stalls the rest of the queue
         self.retry_at: dict[int, float] = {}
         self.retry_files: dict[int, float] = {}  # same for the Telegram file, so a duplicate copy waits too
+        self._held_back = False  # the last batch query skipped files that are in backoff
 
     async def _check_schedule(self) -> None:
         s = self.svc.settings
@@ -189,6 +190,7 @@ class MediaQueue:
             where += f" AND id NOT IN ({','.join('?' * len(waiting))})"
             args.extend(waiting)
         waiting_files = [f for f, t in self.retry_files.items() if t > now]
+        self._held_back = bool(waiting or waiting_files)
         if waiting_files:
             where += f" AND (tg_file_id IS NULL OR tg_file_id NOT IN ({','.join('?' * len(waiting_files))}))"
             args.extend(waiting_files)
@@ -203,10 +205,11 @@ class MediaQueue:
             await self._check_schedule()
             batch = await self._next_batch()
             if not batch:
-                pending = [t for t in (*self.retry_at.values(), *self.retry_files.values()) if t > time.monotonic()]
-                if not pending:
+                if not self._held_back:
                     break
-                await asyncio.sleep(min(pending) - time.monotonic())  # only files in backoff are left
+                # only files in backoff are left: wait for the earliest one, then look again
+                pending = [t for t in (*self.retry_at.values(), *self.retry_files.values()) if t > time.monotonic()]
+                await asyncio.sleep(max(0.05, min(pending) - time.monotonic()) if pending else 0.05)
                 continue
             by_chat: dict[int, list[dict[str, Any]]] = {}
             for r in batch:
