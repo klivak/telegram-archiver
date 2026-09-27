@@ -382,28 +382,69 @@ async def export_estimate(request: Request, body: ExportIn) -> dict[str, Any]:
 
     svc = S(request)
     est = await estimate(svc, body.chat_ids, [] if body.no_media else body.media_types, body.filters)
+    # every type (selected or not) so the UI can show what each checkbox would add
+    all_types = (await estimate(svc, body.chat_ids, None, body.filters))["by_type"]
     unsynced = await svc.db.scalar(
         f"SELECT count(*) FROM chats c LEFT JOIN sync_state s ON s.chat_id=c.id AND s.topic_id=0 WHERE c.id IN "
         f"({','.join('?' * len(body.chat_ids))}) AND coalesce(s.done,0)=0", body.chat_ids) if body.chat_ids else 0
-    msgs = await svc.db.scalar(
-        f"SELECT coalesce(sum(stored_messages),0) FROM chats WHERE id IN ({','.join('?' * len(body.chat_ids))})",
-        body.chat_ids) if body.chat_ids else 0
+    counts = await svc.db.fetchone(
+        f"SELECT coalesce(sum(c.stored_messages),0) AS stored, coalesce(sum(s.total),0) AS total FROM chats c "
+        f"LEFT JOIN sync_state s ON s.chat_id=c.id AND s.topic_id=0 "
+        f"WHERE c.id IN ({','.join('?' * len(body.chat_ids))})", body.chat_ids) if body.chat_ids else None
+    msgs = counts["stored"] if counts else 0
     protected = await svc.db.scalar(
         f"SELECT count(*) FROM chats WHERE noforwards=1 AND id IN ({','.join('?' * len(body.chat_ids))})",
         body.chat_ids) if body.chat_ids else 0
-    return {"media": est, "unsynced_chats": unsynced, "messages": msgs, "protected_chats": protected,
+    return {"media": est, "all_types": all_types, "unsynced_chats": unsynced, "messages": msgs,
+            "messages_total": max(counts["total"] if counts else 0, msgs), "protected_chats": protected,
             "protected_enabled": svc.settings.protected_content}
 
 
 @router.post("/open-path")
 async def open_path(request: Request, path: str = Body(..., embed=True)) -> dict[str, Any]:
+    return _reveal(S(request), Path(path))
+
+
+@router.post("/media/{media_id}/reveal")
+async def media_reveal(request: Request, media_id: int) -> dict[str, Any]:
+    """Show a downloaded file in Explorer; for a file still in progress open the folder it goes to."""
     svc = S(request)
-    p = Path(path).resolve()
+    row = await svc.db.fetchone("SELECT * FROM media WHERE id=?", (media_id,))
+    chat = row and await svc.db.fetchone("SELECT * FROM chats WHERE id=?", (row["chat_id"],))
+    if not row or not chat:
+        raise HTTPException(404)
+    from tgarchiver.media.downloader import media_path
+
+    target = Path(row["path"]) if row["path"] else media_path(svc, chat, row)
+    return _reveal(svc, target)
+
+
+@router.post("/chats/{chat_id}/reveal")
+async def chat_reveal(request: Request, chat_id: int) -> dict[str, Any]:
+    svc = S(request)
+    chat = await svc.db.fetchone("SELECT * FROM chats WHERE id=?", (chat_id,))
+    if not chat:
+        raise HTTPException(404)
+    from tgarchiver.media.downloader import chat_dir
+
+    return _reveal(svc, chat_dir(svc, chat))
+
+
+@router.post("/archive/reveal")
+async def archive_reveal(request: Request) -> dict[str, Any]:
+    svc = S(request)
+    return _reveal(svc, svc.account_dir if svc.account_dir.exists() else svc.settings.archive_path)
+
+
+def _reveal(svc: Services, path: Path) -> dict[str, Any]:
+    p = path.resolve()
     root = svc.settings.archive_path.resolve()
     if p != root and root not in p.parents:
         raise HTTPException(403, "outside archive")
+    while not p.exists() and p != root:
+        p = p.parent  # not downloaded yet: open the closest folder that exists
     if not p.exists():
-        raise HTTPException(404)
+        p.mkdir(parents=True, exist_ok=True)
     # Never "open" a file (that would execute downloaded .exe/.lnk/.bat); folders are opened, files revealed.
     if sys.platform == "win32":
         if p.is_dir():
@@ -413,7 +454,7 @@ async def open_path(request: Request, path: str = Body(..., embed=True)) -> dict
     else:
         target = p if p.is_dir() else p.parent
         subprocess.Popen(["open" if sys.platform == "darwin" else "xdg-open", str(target)])  # noqa: S603, S607
-    return {"ok": True}
+    return {"ok": True, "path": str(p)}
 
 
 @router.get("/archive-file")

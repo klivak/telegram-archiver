@@ -6,12 +6,19 @@ import { useFormat } from '@/composables/format'
 import { api, events } from '@/api/client'
 import type { MediaItem } from '@/api/types'
 import JobCard from '@/components/JobCard.vue'
+import { useAppStore } from '@/stores/app'
 import { useJobsStore } from '@/stores/jobs'
 import { formatBytes } from '@/utils'
 
 const fmt = useFormat()
 const { t } = useI18n()
 const jobs = useJobsStore()
+const app = useAppStore()
+const openArchive = () => api.post('/archive/reveal')
+const reveal = (id: number) => api.post(`/media/${id}/reveal`)
+function copyPath() {
+  if (app.settings?.archive_root) navigator.clipboard?.writeText(app.settings.archive_root)
+}
 const tab = ref<'jobs' | 'media'>('jobs')
 const media = ref<MediaItem[]>([])
 const counts = ref<Record<string, { n: number; bytes: number; done: number }>>({})
@@ -68,6 +75,15 @@ const doneBytes = (m: MediaItem) => live.value[m.id]?.bytes_done ?? (m.status ==
         <NButton @click="jobs.all('clear')">🧹 {{ t('downloads.clear') }}</NButton>
       </NButtonGroup>
     </div>
+    <div class="where">
+      <span class="where-ico">📁</span>
+      <div class="grow" style="min-width: 0">
+        <div class="small muted">{{ t('downloads.savedTo') }}</div>
+        <div class="where-path ellipsis" :title="app.settings?.archive_root">{{ app.settings?.archive_root }}</div>
+      </div>
+      <NButton size="small" quaternary :title="t('common.copy')" @click="copyPath">⧉</NButton>
+      <NButton size="small" type="primary" secondary @click="openArchive">📂 {{ t('downloads.openInExplorer') }}</NButton>
+    </div>
         <NTabs v-model:value="tab" type="line" animated>
       <NTabPane name="jobs" :tab="t('downloads.jobs', { n: fmt.n(jobs.active.length) })">
         <div class="small muted" style="margin: 4px 0 12px">⌨ {{ t('downloads.spaceHint') }}</div>
@@ -108,6 +124,7 @@ const doneBytes = (m: MediaItem) => live.value[m.id]?.bytes_done ?? (m.status ==
                 <NProgress v-if="item.status === 'downloading' || item.status === 'paused'" type="line" :percentage="item.size ? Math.round((doneBytes(item) / item.size) * 100) : 0" :show-indicator="false" :height="3" />
               </div>
               <NSpace size="small">
+                <NButton size="tiny" quaternary :title="item.status === 'done' ? t('downloads.showFile') : t('common.openFolder')" @click="reveal(item.id)">📂</NButton>
                 <NButton v-if="['pending', 'paused', 'failed'].includes(item.status)" size="tiny" :title="t('chat.downloadNow')" @click="mediaAction(item.id, 'download-now')">⚡</NButton>
                 <NButton v-if="['pending', 'downloading'].includes(item.status)" size="tiny" @click="mediaAction(item.id, 'pause')">⏸</NButton>
                 <NButton v-if="item.status === 'paused'" size="tiny" @click="mediaAction(item.id, 'resume')">▶</NButton>
@@ -135,4 +152,7 @@ const doneBytes = (m: MediaItem) => live.value[m.id]?.bytes_done ?? (m.status ==
 .file:hover {
   background: var(--bg-hover);
 }
+.where { display: flex; align-items: center; gap: 12px; padding: 10px 14px; margin-bottom: 16px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-elev); }
+.where-ico { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; background: var(--accent-soft); font-size: 17px; }
+.where-path { font-family: var(--mono); font-size: 12.5px; }
 </style>

@@ -3,6 +3,7 @@ import { NButton, NCard, NProgress, NSpace, NTag, NText } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFormat } from '@/composables/format'
+import { api } from '@/api/client'
 import type { Job } from '@/api/types'
 import { useJobsStore } from '@/stores/jobs'
 import { formatBytes, formatDuration, secondsUntil } from '@/utils'
@@ -48,6 +49,12 @@ const icon = computed(() => ICONS[props.job.kind] ?? '⚙️')
 const chip = computed(() => ({ done: 'green', failed: 'red', flood_wait: 'amber', paused: 'amber' })[props.job.status as string] ?? '')
 const waitLeft = computed(() => (props.job.status === 'flood_wait' ? secondsUntil(props.job.wait_until) : 0))
 const result = computed(() => p.value.result as Record<string, any> | undefined)
+const FOLDER_KINDS = ['export', 'download_media', 'sync_history', 'transcribe', 'miniapp_session']
+const showFolder = computed(() => FOLDER_KINDS.includes(props.job.kind))
+function openFolder() {
+  const ids: number[] = props.job.params?.chat_ids ?? (props.job.params?.chat_id ? [props.job.params.chat_id] : [])
+  api.post(ids.length === 1 ? `/chats/${ids[0]}/reveal` : '/archive/reveal')
+}
 </script>
 
 <template>
@@ -69,6 +76,7 @@ const result = computed(() => p.value.result as Record<string, any> | undefined)
       <NButton v-if="job.status === 'paused'" size="tiny" type="primary" @click="jobs.action(job.id, 'resume')">▶ {{ t('common.resume') }}</NButton>
       <NButton v-if="['failed', 'cancelled'].includes(job.status)" size="tiny" @click="jobs.action(job.id, 'retry')">↻ {{ t('common.retry') }}</NButton>
       <NButton v-if="!['done', 'failed', 'cancelled'].includes(job.status)" size="tiny" quaternary @click="jobs.action(job.id, 'cancel')">✕ {{ t('common.cancel') }}</NButton>
+      <NButton v-if="showFolder" size="tiny" secondary @click="openFolder">📂 {{ t('common.openFolder') }}</NButton>
     </NSpace>
   </NCard>
 </template>

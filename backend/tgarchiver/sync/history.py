@@ -159,8 +159,14 @@ async def chat_preview_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
     chat = await get_chat(svc, chat_id)
     client = await svc.tg.authorized_client()
     newest = int(await svc.db.scalar("SELECT max(id) FROM messages WHERE chat_id=?", (chat_id,)) or 0)
-    batch = await svc.tg.call(lambda: client.get_messages(input_peer(chat), limit=PREVIEW_LIMIT, min_id=newest))
-    batch = [m for m in batch if m is not None and m.id > newest]
+    raw = await svc.tg.call(lambda: client.get_messages(input_peer(chat), limit=PREVIEW_LIMIT, min_id=newest))
+    total = int(getattr(raw, "total", 0) or 0)
+    if total:  # remember the chat size so the UI knows how much history is still missing; checkpoint untouched
+        await svc.db.execute(
+            "INSERT INTO sync_state(chat_id, topic_id, last_message_id, done, total, updated_at) VALUES(?,0,0,0,?,?) "
+            "ON CONFLICT(chat_id, topic_id) DO UPDATE SET total=max(sync_state.total, excluded.total)",
+            (chat_id, total, now_iso()))
+    batch = [m for m in raw if m is not None and m.id > newest]
     if batch:
         await store_batch(svc, chat_id, batch, (svc.tg.me or {}).get("id"), checkpoint=False)
         await refresh_chat_counters(svc, chat_id)

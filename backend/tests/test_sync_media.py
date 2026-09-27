@@ -193,6 +193,7 @@ async def test_chat_preview_fetches_latest_without_moving_checkpoint(svc: Servic
     ids = [r["id"] for r in await svc.db.fetchall("SELECT id FROM messages WHERE chat_id=2000 ORDER BY id")]
     assert ids[0] == 151 and ids[-1] == 250
     assert not await svc.db.fetchone("SELECT 1 FROM sync_state WHERE chat_id=2000 AND last_message_id > 0")
+    assert await svc.db.scalar("SELECT total FROM sync_state WHERE chat_id=2000") == 250
     # opening again only pulls what is new
     client.messages.append(make_msg(251, text="new"))
     job = await svc.engine.wait(await svc.engine.submit("chat_preview", {"chat_id": 2000}), timeout=30)

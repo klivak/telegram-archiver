@@ -82,7 +82,11 @@ function toggleFormat(f: (typeof FORMATS)[number]) {
   form.value.formats = FORMATS.filter((x) => set.has(x))
 }
 const MEDIA_ICONS: Record<string, string> = { photo: '🖼️', video: '🎬', round: '⭕', voice: '🎙️', audio: '🎵', document: '📄', sticker: '🏷️', gif: '🎞️' }
-const estimate = ref<{ media: { count: number; bytes: number; by_type: Record<string, { count: number; bytes: number; done: number }> }; unsynced_chats: number; messages: number; protected_chats: number; protected_enabled: boolean } | null>(null)
+type TypeCount = Record<string, { count: number; bytes: number; done: number }>
+const estimate = ref<{ media: { count: number; bytes: number; by_type: TypeCount }; all_types: TypeCount; unsynced_chats: number; messages: number; messages_total: number; protected_chats: number; protected_enabled: boolean } | null>(null)
+const mediaDone = computed(() => Object.values(estimate.value?.media.by_type ?? {}).reduce((a, x) => a + (x.done || 0), 0))
+const toFetch = computed(() => Math.max(0, (estimate.value?.messages_total ?? 0) - (estimate.value?.messages ?? 0)))
+const catalogPartial = computed(() => toFetch.value > 0 || !!estimate.value?.unsynced_chats)
 const busy = ref(false)
 const presetName = ref('')
 
@@ -188,22 +192,32 @@ const fromSel = computed({
       </section>
 
       <section class="xw-card" data-tour="export-media">
-        <header>
-          <span class="xw-ico">🗂️</span>
-          <div class="grow">
-            <strong>{{ t('export.whatMedia') }}</strong>
-            <div v-if="estimate && !form.no_media" class="small muted">{{ t('export.estimate', { n: fmt.n(estimate.media.count), size: formatBytes(estimate.media.bytes) }) }}</div>
-          </div>
-          <NSwitch v-model:value="form.no_media" size="small"><template #checked>{{ t('export.noMedia') }}</template><template #unchecked>{{ t('export.withMedia') }}</template></NSwitch>
-        </header>
-        <div v-if="!form.no_media" class="xw-grid">
-          <button v-for="m in MEDIA_TYPES" :key="m" type="button" class="xw-tile" :class="{ on: form.media_types.includes(m) }" @click="toggleMedia(m)">
-            <span class="xw-tile-ico">{{ MEDIA_ICONS[m] }}</span>
-            <span class="xw-tile-name">{{ mediaLabel(m) }}</span>
-            <span v-if="estimate?.media.by_type[m]" class="xw-tile-sub">{{ fmt.compact(estimate.media.by_type[m].count) }} · {{ formatBytes(estimate.media.by_type[m].bytes) }}</span>
+        <header><span class="xw-ico">🗂️</span><strong>{{ t('export.whatToSave') }}</strong></header>
+        <div class="xw-modes">
+          <button type="button" class="xw-mode" :class="{ on: form.no_media }" @click="form.no_media = true">
+            <span class="xw-mode-ico">💬</span>
+            <span><strong>{{ t('export.modeText') }}</strong><span class="small muted">{{ t('export.modeTextHint') }}</span></span>
+          </button>
+          <button type="button" class="xw-mode" :class="{ on: !form.no_media }" @click="form.no_media = false">
+            <span class="xw-mode-ico">🖼️</span>
+            <span><strong>{{ t('export.modeMedia') }}</strong><span class="small muted">{{ t('export.modeMediaHint') }}</span></span>
           </button>
         </div>
-        <div v-if="estimate?.unsynced_chats" class="small muted" style="margin-top: 8px">{{ t('export.estimateUnsynced', { n: fmt.n(estimate.unsynced_chats) }) }}</div>
+        <template v-if="!form.no_media">
+          <div class="small muted" style="margin: 12px 0 8px">{{ t('export.pickTypes') }}</div>
+          <div class="xw-grid">
+            <button v-for="m in MEDIA_TYPES" :key="m" type="button" class="xw-tile" :class="{ on: form.media_types.includes(m), empty: estimate && !estimate.all_types[m] }" @click="toggleMedia(m)">
+              <span class="xw-tile-ico">{{ MEDIA_ICONS[m] }}</span>
+              <span class="xw-tile-name">{{ mediaLabel(m) }}</span>
+              <span class="xw-tile-sub">
+                <template v-if="estimate?.all_types[m]">{{ fmt.compact(estimate.all_types[m].count) }} · {{ formatBytes(estimate.all_types[m].bytes) }}</template>
+                <template v-else-if="estimate">{{ t('export.none') }}</template>
+              </span>
+              <span v-if="estimate?.all_types[m]?.done" class="xw-tile-done">✓ {{ fmt.compact(estimate.all_types[m].done) }}</span>
+            </button>
+          </div>
+        </template>
+        <div v-if="estimate && catalogPartial" class="xw-note small">ℹ️ {{ t('export.partialNote', { n: fmt.n(estimate.messages), total: fmt.n(estimate.messages_total) }) }}</div>
       </section>
 
       <section class="xw-card">
@@ -255,6 +269,19 @@ const fromSel = computed({
         </NCollapseItem>
       </NCollapse>
 
+      <section v-if="estimate" class="xw-plan">
+        <strong>{{ t('export.planTitle') }}</strong>
+        <ol>
+          <li v-if="toFetch">{{ t('export.planFetch', { n: fmt.n(toFetch) }) }}</li>
+          <li v-else>{{ t('export.planHave', { n: fmt.n(estimate.messages) }) }}</li>
+          <li>{{ t('export.planWrite', { formats: form.formats.map((f) => t(`formats.${f}`)).join(', '), split: t(`split.${form.split.mode}`).toLowerCase() }) }}</li>
+          <li v-if="form.no_media">{{ t('export.planNoMedia') }}</li>
+          <li v-else-if="estimate.media.count">{{ t('export.planMedia', { n: fmt.n(estimate.media.count - mediaDone), size: formatBytes(estimate.media.bytes), done: fmt.n(mediaDone) }) }}</li>
+          <li v-else>{{ t('export.planMediaNone') }}</li>
+          <li>{{ t('export.planWhere') }}</li>
+        </ol>
+      </section>
+
       <NAlert v-if="estimate?.protected_chats && !app.settings?.protected_content" type="warning" :show-icon="true" style="margin-top: 12px">{{ t('export.protectedWarn', { n: fmt.n(estimate.protected_chats) }) }}</NAlert>
 
       <template #footer>
@@ -296,5 +323,18 @@ const fromSel = computed({
 .xw-fade-enter-from, .xw-fade-leave-to { opacity: 0; transform: translateY(-4px); }
 @media (max-width: 600px) { .xw-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (prefers-reduced-motion: reduce) { .xw-tile:hover { transform: none; } }
+.xw-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.xw-mode { font: inherit; text-align: left; display: flex; gap: 10px; align-items: center; padding: 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text); cursor: pointer; transition: all var(--dur) var(--ease); }
+.xw-mode > span:last-child { display: flex; flex-direction: column; gap: 2px; }
+.xw-mode:hover { border-color: var(--border-strong); }
+.xw-mode.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
+.xw-mode-ico { font-size: 20px; }
+.xw-tile { position: relative; }
+.xw-tile.empty { opacity: 0.45; }
+.xw-tile-done { position: absolute; top: 4px; right: 6px; font-size: 10px; color: var(--success); font-variant-numeric: tabular-nums; }
+.xw-note { margin-top: 10px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--text-2); }
+.xw-plan { border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); padding: 12px 14px; margin: 12px 0; font-size: 13px; }
+.xw-plan ol { margin: 6px 0 0; padding-left: 18px; color: var(--text-2); line-height: 1.7; }
+@media (max-width: 600px) { .xw-modes { grid-template-columns: 1fr; } }
 </style>
 
