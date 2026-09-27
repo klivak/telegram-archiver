@@ -12,7 +12,7 @@ Local open-source archiver for your own Telegram account: private and personal c
 
 ## Features
 - QR login in 30 seconds (or phone + code + 2FA)
-- Export private chats, private groups/channels, forums, archive - including content-protected chats (opt-in)
+- Export private chats, private groups/channels, forums, archive - including content-protected chats (on by default, can be turned off in Settings)
 - Media with type filters, chunked downloads, pause, retries, resume
 - Export as one file or split (month / size / LLM tokens) to MD, TXT, JSON(L), HTML, CSV
 - Fast local search, presets, custom topic folders

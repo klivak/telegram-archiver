@@ -119,6 +119,10 @@ async def test_media_download_resume_dedup_and_refresh(svc: Services) -> None:
 
 
 async def test_protected_chat_media_skipped_until_enabled(svc: Services) -> None:
+    from tgarchiver.core.config import Settings
+
+    assert Settings().protected_content is True  # on by default
+    svc.settings.protected_content = False
     await add_chat(svc, noforwards=1)
     client = FakeClient([make_msg(1, media=make_doc(21, 100))], {21: b"y" * 100})
     use_client(svc, client)
