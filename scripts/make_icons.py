@@ -1,6 +1,6 @@
 """Turn a logo generated on a solid background (default magenta #FF00FF) into transparent PNGs and a Windows .ico.
 
-Usage: uv run --with pillow python scripts/make_icons.py generated.png [--bg FF00FF] [--tolerance 60] [--out docs/assets]
+Usage: uv run --with pillow python scripts/make_icons.py generated.png [--bg FF00FF] [--tolerance 60] [--out assets]
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def main() -> None:
     ap.add_argument("src", type=Path)
     ap.add_argument("--bg", default="FF00FF", help="background hex colour")
     ap.add_argument("--tolerance", type=int, default=60)
-    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "docs" / "assets")
+    ap.add_argument("--out", type=Path, default=Path(__file__).resolve().parent.parent / "assets")
     args = ap.parse_args()
     bg = tuple(int(args.bg.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4))
     img = square_crop(remove_background(Image.open(args.src), bg, args.tolerance))  # type: ignore[arg-type]

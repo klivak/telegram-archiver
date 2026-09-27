@@ -1,6 +1,10 @@
+<p align="center"><img src="assets/logo-512.png" width="128" alt="Telegram Archiver logo"></p>
+
 # Telegram Archiver
 
 **English** | [Українська](README.uk.md)
+
+![Telegram Archiver](assets/banner.png)
 
 Local open-source archiver for your own Telegram account: private and personal chats, groups, channels, media, Mini Apps, local Whisper transcription and AI digests of unread messages. Everything stays on your machine.
 

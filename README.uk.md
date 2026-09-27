@@ -1,6 +1,10 @@
+<p align="center"><img src="assets/logo-512.png" width="128" alt="Telegram Archiver logo"></p>
+
 # Telegram Archiver
 
 [English](README.md) | **Українська**
+
+![Telegram Archiver](assets/banner.png)
 
 Локальний open-source архіватор твого Telegram: особисті та приватні чати, групи, канали, медіа, Mini Apps, транскрипція голосових (Whisper) і AI-дайджест непрочитаного. Все зберігається на твоєму комп'ютері.
 
