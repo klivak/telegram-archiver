@@ -53,3 +53,16 @@ def test_whisper_status_and_test_endpoint(ctx, monkeypatch) -> None:
     monkeypatch.setattr(wh, "available", lambda: True)
     r = c.post("/api/whisper/test")
     assert r.status_code == 400 and r.json()["detail"]["code"] == "no_voice_downloaded"
+
+
+async def test_miniapp_resolver_args(monkeypatch) -> None:
+    from tgarchiver.miniapps import recorder
+
+    async def fake(host: str) -> str | None:
+        return "1.2.3.4" if host == "app.pages.dev" else None
+
+    monkeypatch.setattr(recorder, "doh_resolve", fake)
+    assert await recorder.resolver_args("https://app.pages.dev/#tgWebAppData=x") == [
+        "--host-resolver-rules=MAP app.pages.dev 1.2.3.4"]
+    assert await recorder.resolver_args("https://other.example/") == []
+    assert await recorder.resolver_args("http://10.0.0.1/") == []

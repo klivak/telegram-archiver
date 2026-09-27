@@ -142,6 +142,37 @@ async def _click_safe(page: Any, text: str) -> bool:
     return False
 
 
+DOH_URL = "https://cloudflare-dns.com/dns-query"
+
+
+async def doh_resolve(host: str) -> str | None:
+    """IPv4 of ``host`` via DNS-over-HTTPS. Some ISPs answer Mini App hosts (e.g. *.pages.dev) with their own server,
+    which breaks TLS with ERR_CERT_COMMON_NAME_INVALID; the real address avoids that."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as c:
+            r = await c.get(DOH_URL, params={"name": host, "type": "A"}, headers={"accept": "application/dns-json"})
+            r.raise_for_status()
+            for a in r.json().get("Answer", []):
+                if a.get("type") == 1 and re.fullmatch(r"\d+\.\d+\.\d+\.\d+", str(a.get("data", ""))):
+                    return str(a["data"])
+    except Exception as e:  # noqa: BLE001
+        log.info("DoH lookup failed: %s", type(e).__name__)
+    return None
+
+
+async def resolver_args(url: str) -> list[str]:
+    """Chromium flag pinning the Mini App host to its DoH address (empty if the lookup fails)."""
+    from urllib.parse import urlsplit
+
+    host = urlsplit(url).hostname or ""
+    if not host or re.fullmatch(r"[\d.]+", host):
+        return []
+    ip = await doh_resolve(host)
+    return [f"--host-resolver-rules=MAP {host} {ip}"] if ip else []
+
+
 async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
     if not available():
         raise RuntimeError("playwright_not_installed")
@@ -162,9 +193,10 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
     started = time.monotonic()
     duration = int(p.get("duration_s") or (900 if mode == "manual" else 300))
     await ctx.progress(stage="open", states=0, force=True)
+    dns_args = await resolver_args(url)
     async with async_playwright() as pw:
         context = await pw.chromium.launch_persistent_context(
-            user_data_dir=str(profile), headless=mode == "auto" and not p.get("headful"),
+            user_data_dir=str(profile), headless=mode == "auto" and not p.get("headful"), args=dns_args,
             viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True, user_agent=TG_UA,
             record_har_path=str(out / "session.har"), record_har_content="attach",
             record_video_dir=str(out / "video") if p.get("video") else None,
@@ -282,7 +314,7 @@ async def replay_har(svc: Services, ctx: JobContext) -> dict[str, Any]:
     out = Path(snap["path"])
     meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=False)
+        browser = await pw.chromium.launch(headless=False, args=await resolver_args(meta["url"]))
         context = await browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
         await context.route_from_har(str(out / "session.har"), not_found="abort")
         page = await context.new_page()
