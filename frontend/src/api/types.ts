@@ -22,6 +22,7 @@ export interface AuthStatus {
   state: 'need_config' | 'idle' | 'qr' | 'code_sent' | 'password' | 'ready'
   me: Me | null
   password_hint: string | null
+  phone?: string | null
 }
 
 export interface Chat {

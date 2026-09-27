@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -87,6 +88,8 @@ class AuthService:
             "state": self.state if configured else "need_config",
             "me": self.tg.me if authorized else None,
             "password_hint": self.password_hint,
+            # optional prefill for phone login (TGARCHIVER_PHONE in .env); only sent before login
+            "phone": None if authorized else (os.environ.get("TGARCHIVER_PHONE") or None),
         }
 
     async def _finish(self) -> None:
