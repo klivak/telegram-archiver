@@ -251,3 +251,39 @@ async def test_export_with_date_fetches_only_that_period_and_downloads_media_whi
     # the partial run must not mark the chat as fully synced nor move the checkpoint
     state = await svc.db.fetchone("SELECT * FROM sync_state WHERE chat_id=2000")
     assert not state or (not state["done"] and state["last_message_id"] == 0)
+
+
+async def test_export_downloads_only_its_types_and_cancel_dequeues(svc: Services) -> None:
+    await add_chat(svc)
+    vid = types.DocumentAttributeVideo(duration=1, w=10, h=10)
+    msgs = [make_msg(1, media=make_doc(701, 30, name="v.mp4", attrs=[vid], mime="video/mp4")),
+            make_msg(2, media=make_doc(702, 30, name="d.bin"))]
+    client = FakeClient(msgs, {701: b"v" * 30, 702: b"d" * 30})
+    use_client(svc, client)
+    await sync_chat_history(svc, Ctx(), 2000)  # type: ignore[arg-type]
+    assert await svc.db.scalar("SELECT type FROM media WHERE message_id=1") == "video"
+    await enqueue(svc, [2000], ["video"], {})  # left over from an earlier export
+    job = await svc.engine.wait(await svc.engine.submit("export", {
+        "chat_ids": [2000], "formats": ["md"], "media_types": ["document"]}), timeout=60)
+    assert job["status"] == "done", job
+    st = {r["message_id"]: r["status"] for r in await svc.db.fetchall("SELECT * FROM media")}
+    assert st == {1: "pending", 2: "done"}  # the queued video was not downloaded by a documents-only export
+
+    # cancelling an export takes its queued (not started) files back out of the queue
+    import pytest
+
+    from tgarchiver.export import job as export_mod
+    from tgarchiver.jobs.engine import JobCancelled
+
+    async def cancelled(*_a: object) -> None:
+        raise JobCancelled()
+
+    orig = export_mod._export
+    export_mod._export = cancelled  # type: ignore[assignment]
+    try:
+        ctx = type("C", (), {"params": {"chat_ids": [2000], "media_types": ["video"]}})()
+        with pytest.raises(JobCancelled):
+            await export_mod.export_job(svc, ctx)  # type: ignore[arg-type]
+    finally:
+        export_mod._export = orig
+    assert await svc.db.scalar("SELECT status FROM media WHERE message_id=1") == "available"

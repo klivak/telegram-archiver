@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 from telethon import errors
 
 from tgarchiver.export.exporter import Exporter, export_full_file
-from tgarchiver.jobs.engine import FloodWait, JobContext
+from tgarchiver.jobs.engine import FloodWait, JobCancelled, JobContext
 from tgarchiver.media.downloader import MediaQueue, enqueue
 from tgarchiver.sync.history import get_chat, sync_chat_history
 
@@ -22,6 +22,23 @@ log = logging.getLogger(__name__)
 
 
 async def export_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
+    try:
+        return await _export(svc, ctx)
+    except JobCancelled:
+        # cancelling the export also takes its not-yet-started files out of the queue
+        p = ctx.params
+        chat_ids = [int(c) for c in p.get("chat_ids", [])]
+        types_ = [] if p.get("no_media") else list(p.get("media_types") or [])
+        if chat_ids and types_:
+            await svc.db.execute(
+                f"UPDATE media SET status='available' WHERE status='pending' AND priority=0 "
+                f"AND chat_id IN ({','.join('?' * len(chat_ids))}) AND type IN ({','.join('?' * len(types_))})",
+                [*chat_ids, *types_])
+            svc.bus.emit("media.changed")
+        raise
+
+
+async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
     p = ctx.params
     chat_ids: list[int] = [int(c) for c in p.get("chat_ids", [])]
     formats: list[str] = p.get("formats") or [p.get("format") or "md"]
@@ -62,7 +79,7 @@ async def export_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
                         await enqueue(svc, [cid], media_types, filters)
                         ev.set()
 
-                    media_task = asyncio.create_task(_media_worker(svc, ctx, chat["id"], new_batch))
+                    media_task = asyncio.create_task(_media_worker(svc, ctx, chat["id"], new_batch, media_types))
                 try:
                     await sync_chat_history(svc, ctx, chat["id"], client=client, progress_prefix=prefix,
                                             since=filters.get("date_from"),
@@ -89,19 +106,22 @@ async def export_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
         await ctx.progress(stage="media", force=True)
         q = MediaQueue(svc, ctx)
         q.chat_ids = targets
+        q.types = media_types
         media_result = await q.run()
     await ctx.progress(stage="done", force=True)
     svc.bus.emit("chats.changed")
     return {"chats": len(chat_ids), "skipped_protected": skipped, "media": media_result}
 
 
-async def _media_worker(svc: Services, ctx: JobContext, chat_id: int, new_batch: asyncio.Event) -> None:
+async def _media_worker(svc: Services, ctx: JobContext, chat_id: int, new_batch: asyncio.Event,
+                        types_: list[str]) -> None:
     """Download queued files of one chat in the background while its history sync runs."""
     while True:
         await new_batch.wait()
         new_batch.clear()
         q = MediaQueue(svc, ctx)
         q.chat_ids = [chat_id]
+        q.types = types_
         await q.run()
 
 

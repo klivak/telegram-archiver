@@ -133,6 +133,8 @@ class MediaQueue:
         self.svc = svc
         self.ctx = ctx
         self.chat_ids: list[int] | None = ctx.params.get("chat_ids") or None
+        # an export only downloads the media types it asked for, even if other files of the chat are queued
+        self.types: list[str] | None = None
         self.bytes_session = 0
         self.session_total = 0
         self.started = time.monotonic()
@@ -162,6 +164,9 @@ class MediaQueue:
         if self.chat_ids:
             where += f" AND chat_id IN ({','.join('?' * len(self.chat_ids))})"
             args = list(self.chat_ids)
+        if self.types:
+            where += f" AND type IN ({','.join('?' * len(self.types))})"
+            args.extend(self.types)
         row = await self.svc.db.fetchone(
             f"SELECT count(*) AS total, sum(CASE WHEN status='done' THEN 1 ELSE 0 END) AS done, "
             f"coalesce(sum(size),0) AS bytes_total, coalesce(sum(CASE WHEN status='done' THEN size ELSE bytes_done END),0)"
@@ -175,6 +180,9 @@ class MediaQueue:
         if self.chat_ids:
             where += f" AND chat_id IN ({','.join('?' * len(self.chat_ids))})"
             args.extend(self.chat_ids)
+        if self.types:
+            where += f" AND type IN ({','.join('?' * len(self.types))})"
+            args.extend(self.types)
         now = time.monotonic()
         waiting = [i for i, t in self.retry_at.items() if t > now]
         if waiting:
