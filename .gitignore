@@ -1,0 +1,35 @@
+# secrets / personal data - never commit (docs/15)
+*.session
+*.session-journal
+config.json
+dev-token
+archive/
+*.har
+trace.zip
+
+# python
+backend/.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+backend/tests/.tmp-home/
+backend/tgarchiver/web/
+
+# node
+frontend/node_modules/
+frontend/dist/
+
+# build output
+dist/
+*.build/
+*.dist/
+*.onefile-build/
+build/
+*.spec
+
+# env files with secrets (keep .env.example)
+.env
+.env.*
+!.env.example

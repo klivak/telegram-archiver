@@ -1,0 +1,82 @@
+:root {
+  --tga-blue: #2aabee;
+  --tga-navy: #0b3a5b;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+html,
+body,
+#app {
+  margin: 0;
+  height: 100%;
+}
+* {
+  box-sizing: border-box;
+}
+.page {
+  padding: 20px 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.page-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.page-header h1 {
+  font-size: 22px;
+  margin: 0;
+  font-weight: 600;
+  flex: 1;
+}
+.muted {
+  opacity: 0.65;
+}
+.small {
+  font-size: 12px;
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.grid-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+mark {
+  background: #ffe58f;
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.tga-highlight {
+  position: relative;
+  z-index: 3001 !important;
+  box-shadow: 0 0 0 4px var(--tga-blue), 0 0 0 9999px rgba(0, 0, 0, 0.45) !important;
+  border-radius: 8px;
+}
+.skeleton-row {
+  height: 56px;
+  margin: 6px 0;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #8881 25%, #8883 50%, #8881 75%);
+  background-size: 200% 100%;
+  animation: sk 1.2s infinite;
+}
+@keyframes sk {
+  to {
+    background-position: -200% 0;
+  }
+}
