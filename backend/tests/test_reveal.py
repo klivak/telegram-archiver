@@ -66,3 +66,19 @@ async def test_miniapp_resolver_args(monkeypatch) -> None:
         "--host-resolver-rules=MAP app.pages.dev 1.2.3.4"]
     assert await recorder.resolver_args("https://other.example/") == []
     assert await recorder.resolver_args("http://10.0.0.1/") == []
+
+
+def test_build_app_site_merges_sessions(tmp_path) -> None:
+    from tgarchiver.miniapps.recorder import build_app_site
+
+    for sess, pages in (("2026-01-01_100000", ["A", "B"]), ("2026-01-02_100000", ["B", "C"])):
+        st = tmp_path / sess / "states"
+        st.mkdir(parents=True)
+        for i, txt in enumerate(pages, 1):
+            (st / f"{i:03d}.md").write_text(f"# {txt}\n\n> https://x/{txt}\n\nbody {txt}\n", encoding="utf-8")
+    res = build_app_site(tmp_path)
+    assert res["pages"] == 3  # B is only once
+    md = (tmp_path / "all_site.md").read_text(encoding="utf-8")
+    assert "body A" in md and "body C" in md and md.count("body B") == 1
+    html = (tmp_path / "all_index.html").read_text(encoding="utf-8")
+    assert 'href="2026-01-01_100000/states/001.mhtml"' in html

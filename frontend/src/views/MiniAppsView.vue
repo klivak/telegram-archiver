@@ -72,6 +72,19 @@ async function open(a: MiniApp, mode: 'manual' | 'auto') {
   autoModal.value = null
   message.info(mode === 'manual' ? t('miniapps.manualStarted') : t('miniapps.autoStarted'))
 }
+const building = ref(false)
+async function buildSite() {
+  if (!drawer.value) return
+  building.value = true
+  try {
+    const r = await api.post<{ pages: number }>(`/miniapps/${drawer.value.id}/build-site`)
+    message.success(t('miniapps.siteBuilt', { n: r.pages }))
+  } catch {
+    message.warning(t('miniapps.siteBuildFailed'))
+  } finally {
+    building.value = false
+  }
+}
 async function showSnapshots(a: MiniApp) {
   drawer.value = a
   states.value = null
@@ -221,6 +234,13 @@ onBeforeUnmount(() => off?.())
     <NDrawer :show="!!drawer" :width="720" @update:show="(v: boolean) => !v && (drawer = null)">
       <NDrawerContent :title="drawer?.title ?? ''" closable>
         <template v-if="!states">
+          <div v-if="snapshots.length" class="build">
+            <div class="grow">
+              <strong>{{ t('miniapps.buildTitle') }}</strong>
+              <div class="small muted">{{ t('miniapps.buildHint', { n: snapshots.length }) }}</div>
+            </div>
+            <NButton type="primary" :loading="building" @click="buildSite">🧩 {{ t('miniapps.buildBtn') }}</NButton>
+          </div>
           <NEmpty v-if="!snapshots.length" :description="t('miniapps.noSnapshots')" />
           <div v-for="s in snapshots" :key="s.id" class="snap hover-row">
             <span class="icon-chip sm">{{ s.mode === 'auto' ? '🤖' : '▶' }}</span>
@@ -398,4 +418,5 @@ onBeforeUnmount(() => off?.())
 .preset { font: inherit; text-align: left; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text); cursor: pointer; transition: all var(--dur) var(--ease); }
 .preset:hover { border-color: var(--border-strong); }
 .preset.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent) inset; }
+.build { display: flex; align-items: center; gap: 12px; padding: 12px 14px; margin-bottom: 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); }
 </style>

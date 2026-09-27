@@ -50,7 +50,26 @@ const eta = computed(() => {
 const statusType = computed(() => ({ running: 'info', done: 'success', failed: 'error', flood_wait: 'warning', paused: 'warning', queued: 'default', cancelled: 'default' })[props.job.status] as 'info')
 const kindTitle = computed(() => (te(`jobs.kind.${props.job.kind}`) ? t(`jobs.kind.${props.job.kind}`) : props.job.title))
 const chatIds = computed<number[]>(() => props.job.params?.chat_ids ?? (props.job.params?.chat_id ? [props.job.params.chat_id] : []))
+const isMiniApp = computed(() => props.job.kind === 'miniapp_session')
+const mmss = (sec: number) => {
+  const d = formatDuration(sec)
+  return d.h ? `${d.h}:${String(d.m).padStart(2, '0')}:${String(d.s).padStart(2, '0')}` : `${d.m}:${String(d.s).padStart(2, '0')}`
+}
+const maElapsed = computed(() => Number(p.value.elapsed ?? 0))
+const maLeft = computed(() => Math.max(0, Number(p.value.duration ?? 0) - maElapsed.value))
+const maPercent = computed(() => {
+  const x = p.value
+  if (x.mode === 'auto' && x.max_clicks) return clamp(((x.clicks ?? 0) / x.max_clicks) * 100)
+  return x.duration ? clamp((maElapsed.value / x.duration) * 100) : 0
+})
+const finishing = ref(false)
+async function finishSession() {
+  finishing.value = true
+  await api.post(`/miniapps/sessions/${props.job.id}/finish`)
+}
+const snapNow = () => api.post(`/miniapps/sessions/${props.job.id}/snapshot`)
 const subject = computed(() => {
+  if (isMiniApp.value) return (p.value.app_title as string) || ''
   if (p.value.chat_title && chatIds.value.length <= 1) return p.value.chat_title as string
   if (chatIds.value.length === 1) return chats.byId.get(chatIds.value[0])?.title ?? ''
   if (chatIds.value.length > 1) return t('jobs.nChats', { n: fmt.n(chatIds.value.length) })
@@ -98,7 +117,7 @@ const paramChips = computed(() => {
   return out
 })
 
-const FOLDER_KINDS = ['export', 'download_media', 'sync_history', 'transcribe', 'miniapp_session']
+const FOLDER_KINDS = ['export', 'download_media', 'sync_history', 'transcribe']
 const showFolder = computed(() => FOLDER_KINDS.includes(props.job.kind))
 function openFolder() {
   api.post(chatIds.value.length === 1 ? `/chats/${chatIds.value[0]}/reveal` : '/archive/reveal')
@@ -125,7 +144,23 @@ function openFolder() {
       </template>
     </div>
 
-    <template v-if="active || job.status === 'failed'">
+    <template v-if="isMiniApp && (active || job.status === 'done')">
+      <div class="ma">
+        <div class="ma-stat"><span class="small muted">{{ t('jobs.ma.mode') }}</span><strong>{{ p.mode === 'auto' ? '🤖 ' + t('jobs.ma.auto') : '🖐 ' + t('jobs.ma.manual') }}</strong></div>
+        <div class="ma-stat"><span class="small muted">{{ t('jobs.ma.stage') }}</span><strong>{{ te(`jobs.stage.${stage}`) ? t(`jobs.stage.${stage}`) : stage || '…' }}</strong></div>
+        <div class="ma-stat"><span class="small muted">{{ t('jobs.ma.pages') }}</span><strong class="num">{{ fmt.n(p.states ?? 0) }}</strong></div>
+        <div v-if="p.mode === 'auto'" class="ma-stat"><span class="small muted">{{ t('jobs.ma.steps') }}</span><strong class="num">{{ fmt.n(p.clicks ?? 0) }} / {{ fmt.n(p.max_clicks ?? 0) }}</strong></div>
+      </div>
+      <template v-if="active">
+        <NProgress type="line" :percentage="maPercent" :show-indicator="false" :height="6" :processing="job.status === 'running'" style="margin-top: 10px" />
+        <div class="metric-top small" style="margin-top: 4px">
+          <span class="num">⏱ {{ mmss(maElapsed) }}</span>
+          <span v-if="p.duration" class="num">{{ t('jobs.ma.left', { time: mmss(maLeft) }) }}</span>
+        </div>
+        <div class="small muted" style="margin-top: 6px">{{ p.mode === 'auto' ? t('jobs.ma.autoHint') : t('jobs.ma.manualHint') }}</div>
+      </template>
+    </template>
+    <template v-else-if="active || job.status === 'failed'">
       <div v-if="p.msg_total || p.chats_total" class="metric">
         <div class="metric-top small">
           <span>💬 {{ t('jobs.messages') }}</span>
@@ -159,10 +194,14 @@ function openFolder() {
     </div>
 
     <div v-if="!compact" class="actions">
-      <NButton v-if="['running', 'queued', 'flood_wait'].includes(job.status)" size="small" secondary @click="jobs.action(job.id, 'pause')">⏸ {{ t('common.pause') }}</NButton>
+      <NButton v-if="!isMiniApp && ['running', 'queued', 'flood_wait'].includes(job.status)" size="small" secondary @click="jobs.action(job.id, 'pause')">⏸ {{ t('common.pause') }}</NButton>
       <NButton v-if="job.status === 'paused'" size="small" type="primary" @click="jobs.action(job.id, 'resume')">▶ {{ t('common.resume') }}</NButton>
       <NButton v-if="['failed', 'cancelled'].includes(job.status)" size="small" secondary @click="jobs.action(job.id, 'retry')">↻ {{ t('common.retry') }}</NButton>
-      <NButton v-if="showFolder" size="small" secondary @click="openFolder">📂 {{ t('common.openFolder') }}</NButton>
+      <template v-if="isMiniApp && active">
+        <NButton v-if="p.mode !== 'auto'" size="small" secondary @click="snapNow">📸 {{ t('jobs.ma.snap') }}</NButton>
+        <NButton size="small" type="primary" :loading="finishing" @click="finishSession">⏹ {{ t('jobs.ma.finish') }}</NButton>
+      </template>
+      <NButton v-if="showFolder && !(isMiniApp && active)" size="small" secondary @click="openFolder">📂 {{ t('common.openFolder') }}</NButton>
       <span class="grow"></span>
       <NButton size="small" quaternary @click="showDetails = !showDetails">{{ showDetails ? t('jobs.hideDetails') : t('jobs.details') }}</NButton>
       <NButton v-if="active" size="small" quaternary type="error" @click="jobs.action(job.id, 'cancel')">✕</NButton>
@@ -219,4 +258,7 @@ function openFolder() {
 .details .err { color: var(--danger); }
 .det-enter-active, .det-leave-active { transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
 .det-enter-from, .det-leave-to { opacity: 0; transform: translateY(-4px); }
+.ma { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin-top: 12px; }
+.ma-stat { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--bg-sunken); }
+.ma-stat strong { font-size: 13px; }
 </style>

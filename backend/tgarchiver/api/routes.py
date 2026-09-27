@@ -781,6 +781,33 @@ async def open_miniapp(request: Request, app_id: int, body: MiniAppOpenIn) -> di
     return {"job_id": job_id}
 
 
+@router.post("/miniapps/sessions/{job_id}/finish")
+async def miniapp_finish(request: Request, job_id: int) -> dict[str, Any]:
+    """Stop recording/crawling but save everything captured so far (cancel would discard the session)."""
+    from tgarchiver.miniapps.recorder import FINISH
+
+    FINISH.add(job_id)
+    return {"ok": True}
+
+
+@router.post("/miniapps/{app_id}/build-site")
+async def miniapp_build_site(request: Request, app_id: int) -> dict[str, Any]:
+    """Merge all saved sessions of a Mini App into one all_site.md + all_index.html."""
+    import asyncio
+
+    from tgarchiver.miniapps.recorder import build_app_site
+
+    svc = S(request)
+    snap = await svc.db.fetchone(
+        "SELECT path FROM mini_app_snapshots WHERE mini_app_id=? ORDER BY id DESC LIMIT 1", (app_id,))
+    if not snap:
+        raise HTTPException(400, {"code": "no_snapshots"})
+    res = await asyncio.to_thread(build_app_site, Path(snap["path"]).parent)
+    if res["pages"]:
+        _reveal(svc, Path(res["path"]))
+    return res
+
+
 @router.post("/miniapps/sessions/{job_id}/snapshot")
 async def miniapp_snap_now(request: Request, job_id: int) -> dict[str, Any]:
     await S(request).db.kv_set(f"snap_now_{job_id}", True)

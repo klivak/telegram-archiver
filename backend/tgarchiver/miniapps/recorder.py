@@ -61,14 +61,23 @@ def available() -> bool:
     return importlib.util.find_spec("playwright") is not None
 
 
+# job ids asked to "finish and save" (stop recording/crawling but keep everything recorded so far)
+FINISH: set[int] = set()
+
+
 class Session:
-    def __init__(self, out: Path) -> None:
+    def __init__(self, out: Path, job_id: int | None = None) -> None:
         self.out = out
+        self.job_id = job_id
         self.states = 0
         self.hashes: set[str] = set()
         self.events: list[dict[str, Any]] = []
         self.pages: list[dict[str, str]] = []  # readable text of every saved state, for site.md / index.html
         self._lock = asyncio.Lock()
+
+    @property
+    def stop(self) -> bool:
+        return self.job_id is not None and self.job_id in FINISH
 
     async def snapshot(self, page: Any, context: Any, label: str = "") -> bool:
         async with self._lock:
@@ -233,10 +242,12 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
     out = svc.account_dir / "mini_apps" / bot / name / datetime.now().strftime("%Y-%m-%d_%H%M%S")
     out.mkdir(parents=True, exist_ok=True)
     profile = svc.account_dir / "mini_apps" / bot / f"profile_{name}"
-    sess = Session(out)
+    sess = Session(out, ctx.id)
     started = time.monotonic()
     duration = int(p.get("duration_s") or (900 if mode == "manual" else 1800))
-    await ctx.progress(stage="open", states=0, force=True)
+    title = app["title"] or app["short_name"] or app["bot_username"] or ""
+    base = {"app_title": title, "mode": mode, "duration": duration, "max_clicks": int(p.get("max_clicks", 30))}
+    await ctx.progress(stage="open", states=0, **base, force=True)
     dns_args = await resolver_args(url)
     async with async_playwright() as pw:
         context = await pw.chromium.launch_persistent_context(
@@ -267,7 +278,7 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
                 await _auto_crawl(page, context, sess, ctx, url, int(p.get("max_depth", 2)),
                                   int(p.get("max_clicks", 30)), started, duration)
             else:
-                while not closed.is_set() and time.monotonic() - started < duration:
+                while not closed.is_set() and not sess.stop and time.monotonic() - started < duration:
                     await ctx.check()
                     await ctx.progress(stage="recording", states=sess.states,
                                        elapsed=int(time.monotonic() - started))
@@ -290,6 +301,8 @@ async def run_session(svc: Services, ctx: JobContext) -> dict[str, Any]:
                 await context.close()
             except Exception as e:  # noqa: BLE001
                 log.info("browser context close: %s", type(e).__name__)
+    FINISH.discard(ctx.id)
+    await ctx.progress(stage="saving", states=sess.states, force=True)
     sess.write_site()
     meta = {"bot": app["bot_username"], "app": app["short_name"], "kind": app["kind"], "url": strip_init_data(url),
             "mode": mode, "states": sess.states, "events": sess.events[-200:], "created_at": now_iso(),
@@ -330,7 +343,7 @@ async def _crawl_links(page: Any, context: Any, sess: Session, ctx: JobContext, 
     visited = {_norm(start_url)}
     queue = [u for u in await _same_origin_links(page)]
     n = 0
-    while queue and n < budget and time.monotonic() - started < duration:
+    while queue and n < budget and not sess.stop and time.monotonic() - started < duration:
         await ctx.check()
         url = queue.pop(0)
         key = _norm(url)
@@ -350,7 +363,7 @@ async def _crawl_links(page: Any, context: Any, sess: Session, ctx: JobContext, 
             queue += [u for u in await _same_origin_links(page) if _norm(u) not in visited]
         except Exception:  # noqa: BLE001
             pass
-        await ctx.progress(stage="crawl", states=sess.states, clicks=n)
+        await ctx.progress(stage="links", states=sess.states, clicks=n, elapsed=int(time.monotonic() - started))
     return n
 
 
@@ -362,7 +375,7 @@ async def _auto_crawl(page: Any, context: Any, sess: Session, ctx: JobContext, s
     queue: list[list[str]] = [[]]
     clicks = 0
     seen_paths: set[tuple[str, ...]] = set()
-    while queue and clicks < max_clicks and time.monotonic() - started < duration:
+    while queue and clicks < max_clicks and not sess.stop and time.monotonic() - started < duration:
         path = queue.pop(0)
         if len(path) >= max_depth:
             continue
@@ -389,7 +402,8 @@ async def _auto_crawl(page: Any, context: Any, sess: Session, ctx: JobContext, s
             await asyncio.sleep(0.8)  # gentle pace
             if await sess.snapshot(page, context, " > ".join(new_path)):
                 queue.append(new_path)
-            await ctx.progress(stage="crawl", states=sess.states, clicks=clicks)
+            await ctx.progress(stage="crawl", states=sess.states, clicks=clicks,
+                               elapsed=int(time.monotonic() - started))
 
 
 async def _replay(page: Any, start_url: str, path: list[str]) -> bool:
@@ -406,6 +420,35 @@ async def _replay(page: Any, start_url: str, path: list[str]) -> bool:
         except Exception:  # noqa: BLE001
             return False
     return True
+
+
+def build_app_site(app_dir: Path) -> dict[str, Any]:
+    """Merge every saved session of one Mini App into app_dir/all_site.md + all_index.html (duplicates skipped)."""
+    merged = Session(app_dir)
+    seen: set[str] = set()
+    for sd in sorted(p for p in app_dir.iterdir() if p.is_dir() and (p / "states").is_dir()):
+        for md in sorted((sd / "states").glob("*.md")):
+            raw = md.read_text(encoding="utf-8")
+            lines = raw.split("\n")
+            title = lines[0].removeprefix("# ").strip() if lines else md.stem
+            url = next((x[2:].strip() for x in lines[1:4] if x.startswith("> ")), "")
+            text = "\n".join(lines[4:]).strip() if len(lines) > 4 else ""
+            key = hashlib.sha1(text.encode("utf-8", "ignore")).hexdigest()
+            if not text or key in seen:
+                continue
+            seen.add(key)
+            rel = f"{sd.name}/states/{md.stem}"
+            merged.pages.append({"n": rel, "title": title, "label": sd.name, "url": url, "text": text})
+    if merged.pages:
+        merged.write_site()
+        (app_dir / "site.md").replace(app_dir / "all_site.md")
+        html = (app_dir / "index.html").read_text(encoding="utf-8")
+        # links in the merged index point into each session folder
+        html = re.sub(r'(href|src)="states/([^"]+)/states/', r'\1="\2/states/', html)
+        html = html.replace('href="#s', 'href="#s').replace("Mini App - ", "Mini App (all sessions) - ", 1)
+        (app_dir / "all_index.html").write_text(html, encoding="utf-8")
+        (app_dir / "index.html").unlink()
+    return {"pages": len(merged.pages), "path": str(app_dir / "all_index.html")}
 
 
 async def replay_har(svc: Services, ctx: JobContext) -> dict[str, Any]:
