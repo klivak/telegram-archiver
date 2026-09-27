@@ -2,6 +2,7 @@
 import { NAlert, NButton, NCheckbox, NCheckboxGroup, NCollapse, NCollapseItem, NDatePicker, NDivider, NDrawer, NDrawerContent, NDynamicTags, NForm, NFormItem, NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useFormat } from '@/composables/format'
 import { useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import { FORMATS, MEDIA_TYPES, SPLIT_MODES, type ExportRequest, type MediaType } from '@/api/types'
@@ -12,6 +13,7 @@ import { debounce, formatBytes } from '@/utils'
 
 const props = defineProps<{ show: boolean; chatIds: number[] }>()
 const emit = defineEmits<{ 'update:show': [boolean]; started: [number] }>()
+const fmt = useFormat()
 const { t } = useI18n()
 const app = useAppStore()
 const chats = useChatsStore()
@@ -136,8 +138,8 @@ const fromSel = computed({
             </NSpace>
           </NCheckboxGroup>
           <div v-if="estimate" class="small muted" style="margin-top: 6px">
-            <template v-if="!form.no_media">{{ t('export.estimate', { n: estimate.media.count, size: formatBytes(estimate.media.bytes) }) }}</template>
-            <template v-if="estimate.unsynced_chats"> · {{ t('export.estimateUnsynced', { n: estimate.unsynced_chats }) }}</template>
+            <template v-if="!form.no_media">{{ t('export.estimate', { n: fmt.n(estimate.media.count), size: formatBytes(estimate.media.bytes) }) }}</template>
+            <template v-if="estimate.unsynced_chats"> · {{ t('export.estimateUnsynced', { n: fmt.n(estimate.unsynced_chats) }) }}</template>
           </div>
         </div>
 

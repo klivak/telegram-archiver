@@ -2,6 +2,7 @@
 import { NAlert, NButton, NCard, NCheckbox, NDatePicker, NEmpty, NInput, NList, NListItem, NSelect, NSpace, NTabPane, NTabs, NTag, useMessage } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useFormat } from '@/composables/format'
 import { useRoute, useRouter } from 'vue-router'
 import { api, events } from '@/api/client'
 import { useAppStore } from '@/stores/app'
@@ -29,6 +30,7 @@ interface Report {
   result?: Record<string, any>
 }
 
+const fmt = useFormat()
 const { t } = useI18n()
 const app = useAppStore()
 const chats = useChatsStore()
@@ -135,14 +137,17 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
 </script>
 
 <template>
-  <div class="page" data-tour="page">
-    <div class="page-header">
-      <h1>{{ t('nav.monitor') }}</h1>
+  <div class="page">
+    <div class="page-header" data-tour="page">
+      <div class="grow">
+        <h1>{{ t('nav.monitor') }}</h1>
+        <p class="page-desc">{{ t('pageDesc.monitor') }}</p>
+      </div>
       <NButton @click="runMonitor">↻ {{ t('monitor.collect') }}</NButton>
     </div>
     <NAlert type="info" :show-icon="false" class="small" style="margin-bottom: 12px">{{ t('monitor.noRead') }}</NAlert>
-    <NTabs v-model:value="tab" type="line">
-      <NTabPane name="unread" :tab="t('monitor.unreadTab', { n: unread.length })">
+    <NTabs v-model:value="tab" type="line" animated>
+      <NTabPane name="unread" :tab="t('monitor.unreadTab', { n: fmt.n(unread.length) })">
         <div class="small muted" v-if="lastRun">{{ t('monitor.lastRun', { ago: lastRunAgo }) }}</div>
         <NEmpty v-if="!unread.length" :description="t('monitor.allRead')" style="margin: 30px 0" />
         <NList v-else hoverable clickable>
@@ -150,7 +155,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
             <div class="row">
               <strong class="grow ellipsis">{{ u.title }}</strong>
               <NTag v-if="u.mentions" size="small" type="error">@ {{ u.mentions }}</NTag>
-              <NTag size="small" type="info" round>{{ u.unread }}</NTag>
+              <NTag size="small" type="info" round class="num">{{ fmt.compact(u.unread) }}</NTag>
             </div>
             <div v-for="p in u.preview" :key="p.id" class="small muted ellipsis">{{ senderName(p) }}: {{ p.text || (p.media_type ? `[${t(`media.${p.media_type}`, p.media_type)}]` : '') }}</div>
           </NListItem>
@@ -176,7 +181,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
           </NSpace>
           <NInput v-if="task === 'qa'" v-model:value="question" :placeholder="t('ai.question')" style="margin-top: 8px" />
           <div v-if="estimate" class="small muted" style="margin-top: 6px">
-            {{ t('ai.estimateText', estimate) }}
+            {{ t('ai.estimateText', { messages: fmt.n(estimate.messages), chats: fmt.n(estimate.chats), tokens: fmt.n(estimate.tokens), today_used: fmt.n(estimate.today_used), daily_limit: fmt.n(estimate.daily_limit) }) }}
             <template v-if="estimate.untranscribed_voice"> {{ t(canTranscribe && transcribeVoice ? 'ai.voiceWillTranscribe' : 'ai.voiceSkipped', { n: estimate.untranscribed_voice }) }}</template>
           </div>
           <div class="small muted" style="margin-top: 6px">
@@ -194,7 +199,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
           <NCard v-if="current" size="small" class="rbody">
             <div class="row">
               <strong class="grow">{{ t(`ai.task.${current.kind}`) }} · {{ current.created_at.slice(0, 16).replace('T', ' ') }}</strong>
-              <span class="small muted">{{ current.tokens_in + current.tokens_out }} tok</span>
+              <span class="small muted">{{ fmt.n(current.tokens_in + current.tokens_out) }} tok</span>
               <NButton size="tiny" @click="download(current)">JSON</NButton>
               <NButton size="tiny" quaternary @click="deleteReport(current.id)">🗑</NButton>
             </div>

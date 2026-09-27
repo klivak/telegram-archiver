@@ -24,7 +24,7 @@ const waiting = computed(() => {
 </script>
 
 <template>
-  <NAlert v-if="waiting" type="warning" style="margin: 8px 16px 0" :title="t('flood.title', { time: waiting.text })">
+  <NAlert v-if="waiting" type="warning" style="margin: 12px clamp(16px, 3vw, 40px) 0" :title="t('flood.title', { time: waiting.text })">
     {{ waiting.takeout ? t('flood.takeout') : t('flood.text') }}
   </NAlert>
 </template>

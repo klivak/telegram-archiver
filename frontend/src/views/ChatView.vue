@@ -2,6 +2,7 @@
 import { NButton, NDatePicker, NDropdown, NEmpty, NSelect, NSpin, NTag, useMessage } from 'naive-ui'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useFormat } from '@/composables/format'
 import { useRouter } from 'vue-router'
 import { api, events } from '@/api/client'
 import type { Chat, Message } from '@/api/types'
@@ -19,6 +20,7 @@ interface ChatDetail extends Chat {
 }
 
 const props = defineProps<{ id: string }>()
+const fmt = useFormat()
 const { t } = useI18n()
 const app = useAppStore()
 const router = useRouter()
@@ -214,7 +216,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
         </div>
         <div class="small muted">
           {{ chat ? t(`chatType.${chat.type}`) : '' }}<template v-if="chat?.username"> · @{{ chat.username }}</template>
-          <template v-if="chat"> · {{ t('chats.stored', { n: chat.stored_messages.toLocaleString(), p: chat.total_messages ? Math.round((chat.stored_messages / chat.total_messages) * 100) : 0 }) }}</template>
+          <template v-if="chat"> · {{ t('chats.stored', { n: fmt.n(chat.stored_messages), p: chat.total_messages ? Math.round((chat.stored_messages / chat.total_messages) * 100) : 0 }) }}</template>
         </div>
       </div>
       <NSelect v-if="topicOptions.length" v-model:value="topic" :options="topicOptions" clearable size="small" style="width: 170px" :placeholder="t('chat.topic')" />
@@ -243,14 +245,15 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
 .wrap {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
 }
 .head {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
   flex-wrap: wrap;
 }
 .feed {
@@ -264,7 +267,9 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
   margin: 12px 0 6px;
 }
 .day span {
-  background: rgba(128, 128, 128, 0.18);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-2);
   border-radius: 10px;
   padding: 2px 10px;
   font-size: 12px;

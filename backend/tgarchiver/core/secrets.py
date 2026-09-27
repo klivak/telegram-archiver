@@ -5,12 +5,15 @@ Never log values returned from here.
 
 from __future__ import annotations
 
+import os
+
 import keyring
 import keyring.errors
 
 from tgarchiver.core.env import env_secret
 
-SERVICE = "TelegramArchiver"
+# TGARCHIVER_KEYRING isolates a test/second instance from the real account (TGARCHIVER_HOME alone does not).
+SERVICE = os.environ.get("TGARCHIVER_KEYRING") or "TelegramArchiver"
 # Windows Credential Manager caps a blob at ~2.5KB; split long values into chunks.
 _CHUNK = 1200
 

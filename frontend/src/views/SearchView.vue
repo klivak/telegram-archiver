@@ -2,6 +2,7 @@
 import { NButton, NCheckbox, NDatePicker, NEmpty, NInput, NModal, NSelect, NSpace, NTag, useMessage } from 'naive-ui'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useFormat } from '@/composables/format'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import { useChatsStore } from '@/stores/chats'
@@ -19,6 +20,7 @@ interface Hit {
   out: number
 }
 
+const fmt = useFormat()
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
@@ -113,7 +115,10 @@ const open = (h: Hit) => router.push({ path: `/chats/${h.chat_id}`, query: { msg
 <template>
   <div class="page">
     <div class="page-header">
-      <h1>{{ t('nav.search') }}</h1>
+      <div class="grow">
+        <h1>{{ t('nav.search') }}</h1>
+        <p class="page-desc">{{ t('pageDesc.search') }}</p>
+      </div>
       <NSelect v-if="searchPresets.length" :options="searchPresets.map((p) => ({ label: p.name, value: p.id! }))" :placeholder="t('search.presets')" size="small" style="width: 200px" clearable @update:value="applyPreset" />
       <NButton size="small" @click="saveModal = true">★ {{ t('search.savePreset') }}</NButton>
       <NButton size="small" quaternary @click="exportPresets">⇩ JSON</NButton>
@@ -130,7 +135,7 @@ const open = (h: Hit) => router.push({ path: `/chats/${h.chat_id}`, query: { msg
       <NCheckbox v-model:checked="filters.only_mine">{{ t('search.onlyMine') }}</NCheckbox>
       <NSelect v-model:value="filters.sort" :options="[{ label: t('search.sortDate'), value: 'date' }, { label: t('search.sortRank'), value: 'rank' }]" size="small" style="width: 150px" />
     </NSpace>
-    <div v-if="total !== null" class="small muted" style="margin-bottom: 8px">{{ t('search.found', { n: total, ms: took }) }}</div>
+    <div v-if="total !== null" class="small muted" style="margin-bottom: 8px">{{ t('search.found', { n: fmt.n(total), ms: fmt.n(took) }) }}</div>
     <NEmpty v-if="total === 0" :description="t('search.nothing')" />
     <NEmpty v-else-if="total === null" :description="t('search.hint')" />
     <div v-for="h in items" :key="`${h.chat_id}:${h.id}`" class="hit" @click="open(h)">

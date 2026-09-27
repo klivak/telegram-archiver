@@ -2,11 +2,13 @@
 import { NButton, NCard, NProgress, NSpace, NTag, NText } from 'naive-ui'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useFormat } from '@/composables/format'
 import type { Job } from '@/api/types'
 import { useJobsStore } from '@/stores/jobs'
 import { formatBytes, formatDuration, secondsUntil } from '@/utils'
 
 const props = defineProps<{ job: Job; compact?: boolean }>()
+const fmt = useFormat()
 const { t, te } = useI18n()
 const jobs = useJobsStore()
 
@@ -27,9 +29,9 @@ const title = computed(() => (te(`jobs.kind.${props.job.kind}`) ? t(`jobs.kind.$
 const detail = computed(() => {
   const x = p.value
   const parts: string[] = []
-  if (x.chats_total) parts.push(t('jobs.chatsProgress', { done: x.chats_done ?? 0, total: x.chats_total }))
+  if (x.chats_total) parts.push(t('jobs.chatsProgress', { done: fmt.n(x.chats_done), total: fmt.n(x.chats_total) }))
   if (x.chat_title) parts.push(x.chat_title)
-  if (x.msg_total) parts.push(t('jobs.messagesProgress', { done: (x.msg_done ?? 0).toLocaleString(), total: x.msg_total.toLocaleString() }))
+  if (x.msg_total) parts.push(t('jobs.messagesProgress', { done: fmt.n(x.msg_done), total: fmt.n(x.msg_total) }))
   if (x.bytes_total) parts.push(`${formatBytes(x.bytes_done)} / ${formatBytes(x.bytes_total)}`)
   if (x.speed) parts.push(`${formatBytes(x.speed)}/s`)
   if (x.speed && x.bytes_total) {
@@ -41,21 +43,25 @@ const detail = computed(() => {
   if (x.deferred) parts.push(t(`jobs.deferred.${x.deferred}`))
   return parts.join(' · ')
 })
+const ICONS: Record<string, string> = { demo: '🧪', sync_dialogs: '🔄', sync_history: '🔄', export: '📦', render: '🛠️', download_media: '🖼️', transcribe: '🎙️', detect_miniapps: '🧩', miniapp_session: '🧩', miniapp_replay: '⏪', monitor: '🔔', ai: '🤖' }
+const icon = computed(() => ICONS[props.job.kind] ?? '⚙️')
+const chip = computed(() => ({ done: 'green', failed: 'red', flood_wait: 'amber', paused: 'amber' })[props.job.status as string] ?? '')
 const waitLeft = computed(() => (props.job.status === 'flood_wait' ? secondsUntil(props.job.wait_until) : 0))
 const result = computed(() => p.value.result as Record<string, any> | undefined)
 </script>
 
 <template>
-  <NCard size="small" :bordered="true">
+  <NCard size="small" :bordered="true" class="job-card">
     <div class="row">
+      <span class="icon-chip sm" :class="chip">{{ icon }}</span>
       <strong class="grow ellipsis">{{ title }}</strong>
       <NTag size="small" :type="statusType" round>{{ t(`jobs.status.${job.status}`) }}</NTag>
     </div>
     <NProgress v-if="job.status !== 'done' && job.status !== 'cancelled'" type="line" :percentage="percent" :processing="job.status === 'running'" :status="job.status === 'failed' ? 'error' : job.status === 'flood_wait' ? 'warning' : 'default'" style="margin: 8px 0 4px" />
     <NText depth="3" class="small">{{ detail }}</NText>
-    <div v-if="waitLeft" class="small" style="color: #f0a020">{{ t('flood.short', { s: waitLeft }) }}</div>
-    <div v-if="job.error && job.status === 'failed'" class="small" style="color: #d03050; word-break: break-word">{{ job.error }}</div>
-    <div v-if="job.status === 'done' && result?.skipped_protected?.length" class="small" style="color: #f0a020">
+    <div v-if="waitLeft" class="small" style="color: var(--warning)">{{ t('flood.short', { s: waitLeft }) }}</div>
+    <div v-if="job.error && job.status === 'failed'" class="small" style="color: var(--danger); word-break: break-word">{{ job.error }}</div>
+    <div v-if="job.status === 'done' && result?.skipped_protected?.length" class="small" style="color: var(--warning)">
       {{ t('export.skippedProtected', { n: result.skipped_protected.length }) }}
     </div>
     <NSpace v-if="!compact" size="small" style="margin-top: 8px">

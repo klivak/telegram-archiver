@@ -14,6 +14,8 @@ export const useAppStore = defineStore('app', () => {
   const tokenInvalid = ref(false)
   const tutorialOpen = ref(false)
   const paletteOpen = ref(false)
+  /** Onboarding shows a short success animation before the app shell takes over. */
+  const celebrating = ref(false)
   const update = ref<{ available: boolean; latest: string | null; url?: string } | null>(null)
 
   const ready = computed(() => auth.value?.authorized === true)
@@ -63,7 +65,19 @@ export const useAppStore = defineStore('app', () => {
     events.on('reconnected', () => loadAuth())
   }
 
+  // Theme: settings.theme when logged in, otherwise the last choice cached locally (so onboarding matches too).
+  const localTheme = ref(0) // bumps reactivity for the localStorage fallback
+  const themePref = computed<'auto' | 'light' | 'dark'>(() => {
+    void localTheme.value
+    return settings.value?.theme ?? (localStorage.getItem('tga.theme') as 'auto' | 'light' | 'dark' | null) ?? 'auto'
+  })
+  async function setTheme(theme: 'auto' | 'light' | 'dark') {
+    localStorage.setItem('tga.theme', theme)
+    localTheme.value++
+    if (settings.value) await saveSettings({ theme })
+  }
+
   const locale = computed(() => (i18n.global.locale as unknown as { value: string }).value)
 
-  return { auth, settings, modules, wsConnected, backendDown, tokenInvalid, tutorialOpen, paletteOpen, update, ready, advanced, locale, loadAuth, loadSettings, saveSettings, loadModules, checkUpdates, init }
+  return { auth, settings, modules, wsConnected, backendDown, tokenInvalid, tutorialOpen, paletteOpen, celebrating, update, ready, themePref, setTheme, advanced, locale, loadAuth, loadSettings, saveSettings, loadModules, checkUpdates, init }
 })

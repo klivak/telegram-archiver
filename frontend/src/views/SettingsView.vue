@@ -28,6 +28,8 @@ onMounted(async () => {
   version.value = (await fetch('/api/health').then((r) => r.json())).version
 })
 watch(() => app.settings, (s) => s && !form.value && (form.value = JSON.parse(JSON.stringify(s))))
+// The sidebar theme toggle saves immediately; keep the unsaved form in step so Save does not revert it.
+watch(() => app.settings?.theme, (th) => th && form.value && (form.value.theme = th))
 
 const originalRoot = computed(() => app.settings?.archive_root)
 
@@ -126,7 +128,10 @@ const keyName = computed(() => (form.value ? `ai_key_${form.value.ai.provider}` 
 <template>
   <div class="page" v-if="form">
     <div class="page-header">
-      <h1>{{ t('nav.settings') }}</h1>
+      <div class="grow">
+        <h1>{{ t('nav.settings') }}</h1>
+        <p class="page-desc">{{ t('pageDesc.settings') }}</p>
+      </div>
       <NButton type="primary" :loading="saving" @click="save">{{ t('common.save') }}</NButton>
     </div>
     <NTabs v-model:value="tab" type="line" placement="top">

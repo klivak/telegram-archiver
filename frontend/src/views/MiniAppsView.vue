@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NAlert, NButton, NCard, NCode, NDrawer, NDrawerContent, NEmpty, NImage, NInputNumber, NModal, NSpace, NSwitch, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NCollapse, NCollapseItem, NDrawer, NDrawerContent, NEmpty, NImage, NInputNumber, NModal, NSpace, NSwitch, NTag, useMessage } from 'naive-ui'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { api, events } from '@/api/client'
@@ -34,8 +34,27 @@ const states = ref<{ snap: Snapshot; list: State[] } | null>(null)
 const autoModal = ref<MiniApp | null>(null)
 const auto = ref({ max_depth: 2, max_clicks: 30, video: false })
 
+const loaded = ref(false)
 async function load() {
   items.value = (await api.get<{ items: MiniApp[] }>('/miniapps')).items
+  if (!loaded.value && !items.value.length) expanded.value = ['discover', 'install', 'modes']
+  loaded.value = true
+}
+
+// Guide sections; each has p1..pN paragraphs in i18n (miniapps.guide.<key>.pN).
+const guide = [
+  { key: 'discover', icon: '🔍', n: 4 },
+  { key: 'capture', icon: '📸', n: 5 },
+  { key: 'install', icon: '📦', n: 3 },
+  { key: 'modes', icon: '🧭', n: 4 },
+  { key: 'results', icon: '🗂️', n: 4 },
+  { key: 'privacy', icon: '🔒', n: 4 },
+]
+const expanded = ref<string[]>(['discover'])
+const INSTALL = ['cd backend', 'uv sync --extra miniapps', 'uv run playwright install chromium']
+async function copyInstall() {
+  await navigator.clipboard?.writeText(INSTALL.join('; '))
+  message.success(t('miniapps.copied'))
 }
 async function detect() {
   await api.post('/miniapps/detect')
@@ -72,64 +91,129 @@ onBeforeUnmount(() => off?.())
 </script>
 
 <template>
-  <div class="page" data-tour="page">
-    <div class="page-header">
-      <h1>{{ t('nav.miniapps') }}</h1>
+  <div class="page">
+    <div class="page-header" data-tour="page">
+      <div class="grow">
+        <h1>{{ t('nav.miniapps') }}</h1>
+        <p class="page-desc">{{ t('pageDesc.miniapps') }}</p>
+      </div>
       <NButton type="primary" @click="detect">🔍 {{ t('miniapps.detect') }}</NButton>
     </div>
-    <NAlert v-if="!app.modules.playwright" type="info" :title="t('miniapps.installTitle')" style="margin-bottom: 12px">
-      {{ t('miniapps.installText') }}
-      <NCode code="cd backend; uv sync --extra miniapps; uv run playwright install chromium" language="powershell" style="margin-top: 6px" />
-    </NAlert>
-    <NAlert type="warning" :show-icon="false" style="margin-bottom: 12px" class="small">{{ t('miniapps.warning') }}</NAlert>
 
-    <NCard v-for="j in sessions" :key="j.id" size="small" style="margin-bottom: 10px">
-      <div class="row">
-        <span class="grow">🔴 {{ t('miniapps.recording', { n: j.progress.states ?? 0 }) }}</span>
-        <NButton size="small" @click="snapNow(j.id)">📸 {{ t('miniapps.snapNow') }}</NButton>
-        <NButton size="small" @click="jobs.action(j.id, 'cancel')">⏹ {{ t('miniapps.stop') }}</NButton>
-      </div>
-    </NCard>
-
-    <NEmpty v-if="!items.length" :description="t('miniapps.empty')" style="margin-top: 40px" />
-    <div class="grid-cards" style="grid-template-columns: repeat(auto-fill, minmax(300px, 1fr))">
-      <NCard v-for="a in items" :key="a.id" size="small">
-        <div class="row">
-          <strong class="grow ellipsis">🧩 {{ a.title || a.short_name || a.bot_username }}</strong>
-          <NTag size="small">{{ t(`miniapps.kind.${a.kind}`, a.kind) }}</NTag>
+    <div class="layout">
+      <div class="main-col">
+        <!-- module status -->
+        <div class="module surface" :class="{ ok: app.modules.playwright }">
+          <span class="icon-chip" :class="app.modules.playwright ? 'green' : 'amber'">{{ app.modules.playwright ? '✓' : '📦' }}</span>
+          <div class="grow">
+            <div class="strong">{{ app.modules.playwright ? t('miniapps.moduleReady') : t('miniapps.installTitle') }}</div>
+            <div class="small muted">{{ app.modules.playwright ? t('miniapps.moduleReadyText') : t('miniapps.installText') }}</div>
+            <div v-if="!app.modules.playwright" class="cmds">
+              <code v-for="c in INSTALL" :key="c">{{ c }}</code>
+            </div>
+          </div>
+          <NButton v-if="!app.modules.playwright" size="small" @click="copyInstall">⧉ {{ t('miniapps.copy') }}</NButton>
         </div>
-        <div class="small muted ellipsis">@{{ a.bot_username ?? a.bot_id }}<template v-if="a.chat_title"> · {{ t('miniapps.foundIn', { chat: a.chat_title }) }}</template></div>
-        <div class="small muted ellipsis" v-if="a.url">{{ a.url }}</div>
-        <NSpace size="small" style="margin-top: 8px">
-          <NButton size="small" type="primary" :disabled="!app.modules.playwright" @click="open(a, 'manual')">▶ {{ t('miniapps.openRecord') }}</NButton>
-          <NButton size="small" :disabled="!app.modules.playwright" @click="autoModal = a">🤖 {{ t('miniapps.autoCrawl') }}</NButton>
-          <NButton size="small" quaternary @click="showSnapshots(a)">🗂 {{ t('miniapps.snapshots', { n: a.snapshots }) }}</NButton>
-        </NSpace>
-      </NCard>
+
+        <NCard v-for="j in sessions" :key="j.id" size="small" class="rec">
+          <div class="row">
+            <span class="pulse"></span>
+            <span class="grow">{{ t('miniapps.recording', { n: j.progress.states ?? 0 }) }}</span>
+            <NButton size="small" @click="snapNow(j.id)">📸 {{ t('miniapps.snapNow') }}</NButton>
+            <NButton size="small" @click="jobs.action(j.id, 'cancel')">⏹ {{ t('miniapps.stop') }}</NButton>
+          </div>
+        </NCard>
+
+        <div class="section-head">
+          <div class="grow">
+            <h2>{{ t('miniapps.found', { n: items.length }) }}</h2>
+            <p>{{ t('miniapps.foundDesc') }}</p>
+          </div>
+        </div>
+
+        <div v-if="!loaded" class="apps">
+          <div v-for="n in 4" :key="n" class="skeleton" style="height: 128px"></div>
+        </div>
+        <div v-else-if="!items.length" class="empty surface">
+          <span class="icon-chip violet">🧩</span>
+          <h3>{{ t('miniapps.emptyTitle') }}</h3>
+          <p class="muted">{{ t('miniapps.empty') }}</p>
+          <div class="row" style="justify-content: center">
+            <NButton type="primary" @click="detect">🔍 {{ t('miniapps.detect') }}</NButton>
+            <NButton @click="$router.push('/chats')">{{ t('miniapps.syncBots') }}</NButton>
+          </div>
+        </div>
+        <TransitionGroup v-else name="fade" tag="div" class="apps">
+          <div v-for="a in items" :key="a.id" class="app surface lift">
+            <div class="row">
+              <span class="icon-chip">🧩</span>
+              <div class="grow">
+                <div class="strong ellipsis">{{ a.title || a.short_name || a.bot_username }}</div>
+                <div class="small muted ellipsis">@{{ a.bot_username ?? a.bot_id }}<template v-if="a.chat_title"> · {{ t('miniapps.foundIn', { chat: a.chat_title }) }}</template></div>
+              </div>
+              <NTag size="small" round>{{ t(`miniapps.kind.${a.kind}`, a.kind) }}</NTag>
+            </div>
+            <div v-if="a.url" class="small muted ellipsis url">{{ a.url }}</div>
+            <div class="row actions">
+              <NButton size="small" type="primary" :disabled="!app.modules.playwright" @click="open(a, 'manual')">▶ {{ t('miniapps.openRecord') }}</NButton>
+              <NButton size="small" :disabled="!app.modules.playwright" @click="autoModal = a">🤖 {{ t('miniapps.autoCrawl') }}</NButton>
+              <NButton size="small" quaternary @click="showSnapshots(a)">🗂 {{ t('miniapps.snapshots', { n: a.snapshots }) }}</NButton>
+            </div>
+          </div>
+        </TransitionGroup>
+      </div>
+
+      <!-- how it works -->
+      <aside class="guide surface">
+        <div class="guide-head">
+          <span class="icon-chip sm">📘</span>
+          <div class="grow">
+            <div class="strong">{{ t('miniapps.guide.title') }}</div>
+            <div class="small muted">{{ t('miniapps.guide.subtitle') }}</div>
+          </div>
+        </div>
+        <NCollapse v-model:expanded-names="expanded" arrow-placement="right">
+          <NCollapseItem v-for="(g, i) in guide" :key="g.key" :name="g.key">
+            <template #header>
+              <span class="g-title"><span class="g-num num">{{ i + 1 }}</span>{{ g.icon }} {{ t(`miniapps.guide.${g.key}.title`) }}</span>
+            </template>
+            <ul class="g-list">
+              <li v-for="n in g.n" :key="n">{{ t(`miniapps.guide.${g.key}.p${n}`) }}</li>
+            </ul>
+            <div v-if="g.key === 'install'" class="cmds">
+              <code v-for="c in INSTALL" :key="c">{{ c }}</code>
+            </div>
+            <div v-if="g.key === 'results'" class="cmds">
+              <code>mini_apps/&lt;bot&gt;/&lt;app&gt;/&lt;YYYY-MM-DD_HHMMSS&gt;/</code>
+              <code>uv run playwright show-trace trace.zip</code>
+            </div>
+          </NCollapseItem>
+        </NCollapse>
+        <NAlert type="warning" :show-icon="false" class="small" style="margin-top: 14px">{{ t('miniapps.warning') }}</NAlert>
+      </aside>
     </div>
 
-    <NModal :show="!!autoModal" preset="card" :title="t('miniapps.autoCrawl')" style="width: 440px" @update:show="(v: boolean) => !v && (autoModal = null)">
+    <NModal :show="!!autoModal" preset="card" :title="t('miniapps.autoCrawl')" style="width: 460px" @update:show="(v: boolean) => !v && (autoModal = null)">
       <p class="small">{{ t('miniapps.autoText') }}</p>
       <NSpace vertical>
         <div class="row"><span class="grow">{{ t('miniapps.maxDepth') }}</span><NInputNumber v-model:value="auto.max_depth" :min="1" :max="5" style="width: 110px" /></div>
         <div class="row"><span class="grow">{{ t('miniapps.maxClicks') }}</span><NInputNumber v-model:value="auto.max_clicks" :min="1" :max="200" style="width: 110px" /></div>
         <div class="row"><span class="grow">{{ t('miniapps.video') }}</span><NSwitch v-model:value="auto.video" /></div>
       </NSpace>
-      <NButton type="primary" block style="margin-top: 12px" @click="autoModal && open(autoModal, 'auto')">{{ t('miniapps.startCrawl') }}</NButton>
+      <NButton type="primary" block style="margin-top: 14px" @click="autoModal && open(autoModal, 'auto')">{{ t('miniapps.startCrawl') }}</NButton>
     </NModal>
 
     <NDrawer :show="!!drawer" :width="720" @update:show="(v: boolean) => !v && (drawer = null)">
       <NDrawerContent :title="drawer?.title ?? ''" closable>
         <template v-if="!states">
           <NEmpty v-if="!snapshots.length" :description="t('miniapps.noSnapshots')" />
-          <NCard v-for="s in snapshots" :key="s.id" size="small" style="margin-bottom: 8px">
-            <div class="row">
-              <span class="grow">{{ s.created_at.slice(0, 16).replace('T', ' ') }} · {{ t(`miniapps.mode.${s.mode}`) }} · {{ t('miniapps.states', { n: s.states }) }}</span>
-              <NButton size="small" @click="showStates(s)">{{ t('common.open') }}</NButton>
-              <NButton size="small" quaternary @click="openFolder(s.path)">📂</NButton>
-              <NButton size="small" quaternary :disabled="!app.modules.playwright" @click="replay(s)">⟲ {{ t('miniapps.replay') }}</NButton>
-            </div>
-          </NCard>
+          <div v-for="s in snapshots" :key="s.id" class="snap hover-row">
+            <span class="icon-chip sm">{{ s.mode === 'auto' ? '🤖' : '▶' }}</span>
+            <span class="grow">{{ s.created_at.slice(0, 16).replace('T', ' ') }} · {{ t(`miniapps.mode.${s.mode}`) }} · {{ t('miniapps.states', { n: s.states }) }}</span>
+            <NButton size="small" @click="showStates(s)">{{ t('common.open') }}</NButton>
+            <NButton size="small" quaternary :title="s.path" @click="openFolder(s.path)">📂</NButton>
+            <NButton size="small" quaternary :disabled="!app.modules.playwright" @click="replay(s)">⟲ {{ t('miniapps.replay') }}</NButton>
+          </div>
         </template>
         <template v-else>
           <NButton size="small" @click="states = null">← {{ t('common.back') }}</NButton>
@@ -151,10 +235,146 @@ onBeforeUnmount(() => off?.())
 </template>
 
 <style scoped>
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: 20px;
+  align-items: start;
+}
+.main-col {
+  min-width: 0;
+}
+.strong {
+  font-weight: 600;
+}
+.module {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 18px;
+  border-color: var(--warning-soft);
+}
+.module.ok {
+  border-color: var(--border);
+  align-items: center;
+}
+.cmds {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+}
+.cmds code {
+  user-select: all;
+  font-size: 12.5px;
+  padding: 4px 8px;
+}
+.rec {
+  margin-top: 12px;
+}
+.pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 6px var(--danger-soft);
+  }
+}
+.apps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.app {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.url {
+  font-family: var(--mono);
+  font-size: 11.5px;
+}
+.actions {
+  flex-wrap: wrap;
+  margin-top: auto;
+}
+.empty {
+  text-align: center;
+  padding: 36px 24px;
+  border-style: dashed;
+}
+.empty h3 {
+  margin: 12px 0 4px;
+}
+.empty p {
+  max-width: 460px;
+  margin: 0 auto 16px;
+  font-size: 13.5px;
+}
+.guide {
+  padding: 18px 18px 16px;
+  position: sticky;
+  top: 16px;
+}
+.guide-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.g-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.g-num {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  font-size: 11px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.g-list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+}
+.g-list li + li {
+  margin-top: 4px;
+}
+.snap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
 .gallery {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
   margin-top: 10px;
+}
+@media (max-width: 1180px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .guide {
+    position: static;
+  }
 }
 </style>

@@ -36,3 +36,13 @@ describe('chat filters', () => {
     expect(matchFilter(mk({ type: 'supergroup' }), 'groups')).toBe(true)
   })
 })
+
+describe('number formatting', () => {
+  it('groups digits per locale', async () => {
+    const { formatNumber, formatCompact } = await import('../src/utils')
+    expect(formatNumber(379637, 'uk').replace(/\s/g, ' ')).toBe('379 637')
+    expect(formatNumber(379637, 'en')).toBe('379,637')
+    expect(formatCompact(379637, 'en')).toBe('379.6K')
+    expect(formatCompact(1117, 'uk').replace(/\s/g, ' ')).toBe('1 117')
+  })
+})

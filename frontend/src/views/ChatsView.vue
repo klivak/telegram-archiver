@@ -2,6 +2,7 @@
 import { NButton, NCheckbox, NColorPicker, NDropdown, NEmpty, NForm, NFormItem, NInput, NModal, NSelect, NTag, NTooltip, NVirtualList, useDialog, useMessage } from 'naive-ui'
 import { computed, onActivated, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useFormat } from '@/composables/format'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/api/client'
 import type { Chat, Folder } from '@/api/types'
@@ -12,6 +13,7 @@ import { useAppStore } from '@/stores/app'
 import { shortDate } from '@/utils'
 
 defineOptions({ name: 'ChatsView' })
+const fmt = useFormat()
 const { t, locale } = useI18n()
 const store = useChatsStore()
 const app = useAppStore()
@@ -154,7 +156,7 @@ function onMore(k: string) {
 <template>
   <div class="layout">
     <aside class="folders" data-tour="folders">
-      <div class="folder" :class="{ on: folderId === null }" @click="folderId = null">📚 {{ t('folders.all') }} <span class="small muted">{{ store.items.length }}</span></div>
+      <div class="folder" :class="{ on: folderId === null }" @click="folderId = null">📚 {{ t('folders.all') }} <span class="small muted num">{{ fmt.n(store.items.length) }}</span></div>
       <div class="sect row"><span class="grow">{{ t('folders.mine') }}</span><NButton size="tiny" quaternary @click="openFolderModal()">＋</NButton></div>
       <template v-for="f in userFolders" :key="f.id">
         <div class="folder" :class="{ on: folderId === f.id }" :style="f.color ? { borderLeft: `3px solid ${f.color}` } : {}" @click="folderId = f.id" @dblclick="openFolderModal(f)">
@@ -177,7 +179,7 @@ function onMore(k: string) {
     </aside>
 
     <section class="main">
-      <div class="page-header" style="margin-bottom: 8px">
+      <div class="page-header" style="margin-bottom: 12px">
         <h1>{{ t('nav.chats') }}</h1>
         <NInput v-model:value="q" :placeholder="t('chats.filterPlaceholder')" clearable style="max-width: 260px" size="small" />
         <NSelect v-model:value="sort" size="small" style="width: 150px" :options="['recent', 'title', 'unread', 'size'].map((v) => ({ label: t(`chats.sort.${v}`), value: v }))" />
@@ -185,7 +187,7 @@ function onMore(k: string) {
       </div>
       <div class="chips">
         <NTag v-for="f in FILTERS" :key="f" :checked="filter === f" checkable round size="medium" @update:checked="filter = f">
-          {{ t(`chats.filters.${f}`) }} <span class="small muted">{{ counts[f] }}</span>
+          {{ t(`chats.filters.${f}`) }} <span class="small muted num">{{ fmt.n(counts[f]) }}</span>
         </NTag>
       </div>
       <div class="toolbar row">
@@ -203,7 +205,7 @@ function onMore(k: string) {
         <NEmpty v-else-if="!visible.length" :description="store.items.length ? t('chats.noMatch') : t('chats.empty')" style="margin-top: 40px">
           <template #extra><NButton v-if="!store.items.length" @click="refresh">{{ t('chats.loadChats') }}</NButton></template>
         </NEmpty>
-        <NVirtualList v-else :items="visible" :item-size="60" key-field="id" style="height: calc(100vh - 210px)">
+        <NVirtualList v-else :items="visible" :item-size="60" key-field="id" style="height: 100%">
           <template #default="{ item }">
             <div class="chat" :class="{ sel: selected.has(item.id) }" @click="router.push(`/chats/${item.id}`)">
               <NCheckbox :checked="selected.has(item.id)" @click.stop="toggle(item, $event)" />
@@ -216,13 +218,13 @@ function onMore(k: string) {
                 </div>
                 <div class="small muted row">
                   <span>{{ t(`chatType.${item.type}`) }}</span>
-                  <span v-if="item.stored_messages">· {{ t('chats.stored', { n: item.stored_messages.toLocaleString(), p: syncPercent(item) }) }}</span>
+                  <span v-if="item.stored_messages">· {{ t('chats.stored', { n: fmt.n(item.stored_messages), p: syncPercent(item) }) }}</span>
                   <span v-if="item.media_count">· 📎 {{ item.media_done }}/{{ item.media_count }}</span>
                 </div>
               </div>
               <div class="right">
                 <div class="small muted">{{ shortDate(item.last_message_at, locale) }}</div>
-                <NTag v-if="item.unread_count" size="small" round type="info">{{ item.unread_count }}</NTag>
+                <NTag v-if="item.unread_count" size="small" round type="info" class="num">{{ fmt.compact(item.unread_count) }}</NTag>
               </div>
             </div>
           </template>
@@ -247,12 +249,13 @@ function onMore(k: string) {
 <style scoped>
 .layout {
   display: flex;
-  height: 100vh;
+  height: 100%;
 }
 .folders {
   width: 220px;
   flex: none;
-  border-right: 1px solid rgba(128, 128, 128, 0.2);
+  border-right: 1px solid var(--border);
+  background: var(--bg-sunken);
   padding: 12px 6px;
   overflow: auto;
 }
@@ -268,20 +271,35 @@ function onMore(k: string) {
 .folder.sub {
   padding-left: 26px;
 }
-.folder.on,
+.folder {
+  transition: background var(--dur) var(--ease);
+}
 .folder:hover {
-  background: rgba(42, 171, 238, 0.12);
+  background: var(--bg-hover);
+}
+.folder.on {
+  background: var(--bg-active);
+  font-weight: 600;
 }
 .sect {
   margin: 14px 10px 4px;
   font-size: 12px;
   text-transform: uppercase;
-  opacity: 0.6;
+  color: var(--text-3);
+  font-weight: 600;
+  letter-spacing: 0.05em;
 }
 .main {
   flex: 1;
   min-width: 0;
-  padding: 16px 20px 0;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(16px, 2vw, 28px) clamp(16px, 2.4vw, 32px) 0;
+}
+.list {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 8px;
 }
 .chips {
   display: flex;
@@ -301,9 +319,14 @@ function onMore(k: string) {
   border-radius: 8px;
   cursor: pointer;
 }
-.chat:hover,
+.chat {
+  transition: background var(--dur) var(--ease);
+}
+.chat:hover {
+  background: var(--bg-hover);
+}
 .chat.sel {
-  background: rgba(42, 171, 238, 0.08);
+  background: var(--bg-active);
 }
 .title {
   font-weight: 500;

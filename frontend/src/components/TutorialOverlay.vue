@@ -55,19 +55,32 @@ async function show() {
     await nextTick()
     const el = document.querySelector(step.value.target)
     if (el) {
-      el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      // Instant scroll, then measure on the next frame so the card is placed against the final position.
+      el.scrollIntoView({ block: 'nearest', behavior: 'auto' })
       el.classList.add('tga-highlight')
       highlighted = el
-      rect.value = el.getBoundingClientRect()
+      await new Promise((r) => requestAnimationFrame(() => r(null)))
+      measure()
       return
     }
     await new Promise((r) => setTimeout(r, 100))
   }
 }
 
+function measure() {
+  if (highlighted) rect.value = highlighted.getBoundingClientRect()
+}
 watch(i, show)
-onMounted(show)
-onBeforeUnmount(() => highlighted?.classList.remove('tga-highlight'))
+onMounted(() => {
+  show()
+  window.addEventListener('resize', measure)
+  document.addEventListener('scroll', measure, true)
+})
+onBeforeUnmount(() => {
+  highlighted?.classList.remove('tga-highlight')
+  window.removeEventListener('resize', measure)
+  document.removeEventListener('scroll', measure, true)
+})
 
 async function finish() {
   highlighted?.classList.remove('tga-highlight')
@@ -87,20 +100,37 @@ async function tryIt() {
   }
 }
 
+const CARD_W = 360
+const CARD_H = 210
+const GAP = 14
+/** Place the card below, above, right or left of the target - whichever fits; inside the target's bottom-right corner as a last resort. Always clamped to the viewport. */
 const cardStyle = computed(() => {
   const r = rect.value
   if (!r) return { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
-  const below = r.bottom + 220 < window.innerHeight
-  const left = Math.min(Math.max(12, r.left), window.innerWidth - 372)
-  return below ? { left: `${left}px`, top: `${r.bottom + 12}px` } : { left: `${left}px`, top: `${Math.max(12, r.top - 212)}px` }
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const clampX = (x: number) => Math.min(Math.max(12, x), vw - CARD_W - 12)
+  const clampY = (y: number) => Math.min(Math.max(12, y), vh - CARD_H - 12)
+  let left: number
+  let top: number
+  if (r.bottom + GAP + CARD_H < vh) [left, top] = [clampX(r.left), r.bottom + GAP]
+  else if (r.top - GAP - CARD_H > 0) [left, top] = [clampX(r.left), r.top - GAP - CARD_H]
+  else if (r.right + GAP + CARD_W < vw) [left, top] = [r.right + GAP, clampY(r.top)]
+  else if (r.left - GAP - CARD_W > 0) [left, top] = [r.left - GAP - CARD_W, clampY(r.top)]
+  else [left, top] = [clampX(Math.min(r.right, vw) - CARD_W - 24), clampY(Math.min(r.bottom, vh) - CARD_H - 24)]
+  return { left: `${left}px`, top: `${top}px` }
 })
 </script>
 
 <template>
   <div class="veil" v-if="!rect" @click.self="finish"></div>
   <NCard class="coach" :style="cardStyle" size="small">
-    <div class="small muted">{{ i + 1 }} / {{ steps.length }}</div>
-    <p style="margin: 6px 0 12px">
+    <div class="row">
+      <span class="icon-chip sm">🧭</span>
+      <span class="small muted grow">{{ t('tutorial.title') }}</span>
+      <span class="small muted num">{{ i + 1 }} / {{ steps.length }}</span>
+    </div>
+    <p style="margin: 10px 0 12px; line-height: 1.5">
       {{ moduleOff ? t('tutorial.moduleOff') : t(`tutorial.steps.${step.key}`) }}
     </p>
     <div class="dots">
@@ -122,27 +152,38 @@ const cardStyle = computed(() => {
 .veil {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(3, 6, 12, 0.55);
   z-index: 3000;
+  animation: fadein 200ms var(--ease);
 }
 .coach {
   position: fixed;
   width: 360px;
   max-width: calc(100vw - 24px);
   z-index: 3002;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-lg);
+  border-radius: 14px;
+  transition: left 250ms var(--ease), top 250ms var(--ease);
 }
 .dots {
   display: flex;
   gap: 5px;
 }
 .dots span {
+  transition: width 200ms var(--ease), background 200ms var(--ease);
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: #8886;
 }
 .dots span.on {
+  width: 16px;
+  border-radius: 3px;
   background: var(--tga-blue);
+}
+@keyframes fadein {
+  from {
+    opacity: 0;
+  }
 }
 </style>

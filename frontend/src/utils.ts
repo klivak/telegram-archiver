@@ -57,3 +57,25 @@ export function debounce<A extends unknown[]>(fn: (...a: A) => void, ms: number)
     t = setTimeout(() => fn(...a), ms)
   }
 }
+
+const nfCache = new Map<string, Intl.NumberFormat>()
+function nf(locale: string, compact: boolean): Intl.NumberFormat {
+  const key = `${locale}|${compact ? 'c' : 'f'}`
+  let f = nfCache.get(key)
+  if (!f) {
+    f = new Intl.NumberFormat(locale === 'uk' ? 'uk-UA' : locale === 'en' ? 'en-US' : locale, compact ? { notation: 'compact', maximumFractionDigits: 1 } : { maximumFractionDigits: 0 })
+    nfCache.set(key, f)
+  }
+  return f
+}
+
+/** Locale-aware integer formatting: "379 637" (uk) / "379,637" (en). */
+export function formatNumber(n: number | null | undefined, locale: string): string {
+  return nf(locale, false).format(n ?? 0)
+}
+
+/** Compact form for tight places: "380 тис." / "380K". Small numbers stay exact. */
+export function formatCompact(n: number | null | undefined, locale: string): string {
+  const v = n ?? 0
+  return Math.abs(v) < 10000 ? formatNumber(v, locale) : nf(locale, true).format(v)
+}
