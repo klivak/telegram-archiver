@@ -27,6 +27,16 @@ Local open-source archiver for your own Telegram account: private and personal c
 4. Select chats -> "Export".
 
 ## Run from source (Windows)
+
+### Easiest: double-click `start.bat`
+1. Download the repo (Code -> Download ZIP, or `git clone`) and unpack it.
+2. Optional: copy `.env.example` to `.env` and fill in `TGARCHIVER_API_ID` / `TGARCHIVER_API_HASH` so the app skips the keys step.
+3. Double-click **`start.bat`** in the repo folder. On first run it installs [uv](https://docs.astral.sh/uv/) if missing and builds the UI (needs Node 20+ and pnpm), then starts the app and opens the browser.
+4. Keep the console window open while you use the app; close it to stop. Next time just double-click `start.bat` again - keys and login are remembered.
+
+Tip: right-click `start.bat` -> Send to -> Desktop (create shortcut) to start it from the desktop.
+
+### Manual
 Requirements: Python 3.12 + [uv](https://docs.astral.sh/uv/), Node 20+ + pnpm.
 ```powershell
 git clone https://github.com/<owner>/tgarchiver && cd tgarchiver
