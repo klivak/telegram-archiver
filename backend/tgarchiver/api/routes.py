@@ -242,6 +242,20 @@ async def refresh_chats(request: Request) -> dict[str, Any]:
     return {"job_id": await S(request).engine.submit("sync_dialogs", {}, title="sync_dialogs")}
 
 
+@router.post("/chats/{chat_id}/preview")
+async def chat_preview(request: Request, chat_id: int) -> dict[str, Any]:
+    """Pull the latest messages from Telegram when a chat is opened (not a full sync)."""
+    svc = S(request)
+    if not await svc.db.fetchone("SELECT id FROM chats WHERE id=?", (chat_id,)):
+        raise HTTPException(404)
+    running = await svc.db.fetchone(
+        "SELECT id FROM jobs WHERE kind='chat_preview' AND status IN ('queued','running','flood_wait') "
+        "AND json_extract(params, '$.chat_id')=?", (chat_id,))
+    if running:
+        return {"job_id": running["id"]}
+    return {"job_id": await svc.engine.submit("chat_preview", {"chat_id": chat_id}, title="chat_preview")}
+
+
 @router.get("/chats/{chat_id}")
 async def get_chat(request: Request, chat_id: int) -> dict[str, Any]:
     svc = S(request)
@@ -416,7 +430,9 @@ async def archive_file(request: Request, path: str) -> Any:
 # ------------------------------------------------------------------ jobs
 @router.get("/jobs")
 async def list_jobs(request: Request, active: bool = False, limit: int = 200) -> dict[str, Any]:
-    return {"items": await S(request).engine.list_jobs(active_only=active, limit=limit)}
+    items = await S(request).engine.list_jobs(active_only=active, limit=limit)
+    # quick "load latest on open" jobs are internal; keep them out of the Downloads list unless they failed
+    return {"items": [j for j in items if j["kind"] != "chat_preview" or j["status"] == "failed"]}
 
 
 @router.get("/jobs/{job_id}")

@@ -36,6 +36,10 @@ const topic = ref<number | null>(null)
 const jumpDate = ref<number | null>(null)
 const scroller = ref<HTMLElement | null>(null)
 const wizard = ref(false)
+const fetching = ref(false) // pulling the latest messages from Telegram on open
+let fetchTimer: ReturnType<typeof setTimeout> | undefined
+const olderCount = computed(() => (chat.value ? Math.max(0, (chat.value.total_messages ?? 0) - chat.value.stored_messages) : 0))
+const hasOlderOnServer = computed(() => olderCount.value > 0)
 const PAGE = 60
 const MAX_IN_DOM = 600 // windowing: keep the DOM bounded for 100k+ message chats (docs/17)
 
@@ -142,6 +146,29 @@ async function init() {
   const around = Number(router.currentRoute.value.query.msg)
   if (around) await jumpTo({ around }, around)
   else await loadLatest()
+  fetchLatest()
+}
+
+// Opening a chat shows the newest messages straight from Telegram (up to 100 new ones); the full history stays a separate sync.
+async function fetchLatest() {
+  if (!app.auth?.authorized) return
+  fetching.value = true
+  clearTimeout(fetchTimer)
+  fetchTimer = setTimeout(() => (fetching.value = false), 30000) // FloodWait or offline: don't spin forever
+  try {
+    await api.post(`/chats/${chatId.value}/preview`)
+  } catch {
+    fetching.value = false
+  }
+}
+async function onPreview(ev: { data: { chat_id: number; fetched: number } }) {
+  if (ev.data.chat_id !== chatId.value) return
+  clearTimeout(fetchTimer)
+  fetching.value = false
+  if (!ev.data.fetched) return
+  loadChat()
+  if (!items.value.length) await loadLatest()
+  else if (reachedBottom.value) await loadNewer().then(() => (reachedBottom.value = true))
 }
 
 async function downloadNow(mediaId: number) {
@@ -182,6 +209,7 @@ let offs: (() => void)[] = []
 onMounted(() => {
   init()
   offs = [
+    events.on('chat.preview', (ev) => onPreview(ev as { data: { chat_id: number; fetched: number } })),
     events.on('new_message', (ev) => {
       if (ev.data.chat_id === chatId.value && reachedBottom.value) loadNewer().then(() => (reachedBottom.value = true))
     }),
@@ -201,7 +229,10 @@ onMounted(() => {
     }),
   ]
 })
-onBeforeUnmount(() => offs.forEach((f) => f()))
+onBeforeUnmount(() => {
+  offs.forEach((f) => f())
+  clearTimeout(fetchTimer)
+})
 </script>
 
 <template>
@@ -226,11 +257,19 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
       <NDropdown :options="menu" @select="onMenu"><NButton size="small">⋯</NButton></NDropdown>
     </div>
     <div ref="scroller" class="feed" @scroll.passive="onScroll">
-      <div v-if="loading && !items.length" style="text-align: center; padding: 40px"><NSpin /></div>
+      <div v-if="(loading || fetching) && !items.length" class="fetching">
+        <NSpin size="small" />
+        <span>{{ t('chat.fetchingLatest') }}</span>
+      </div>
       <NEmpty v-else-if="!items.length" :description="t('chat.empty')" style="margin-top: 60px">
         <template #extra><NButton type="primary" @click="syncNow">{{ t('chat.syncNow') }}</NButton></template>
       </NEmpty>
       <div v-if="!reachedTop && items.length" class="small muted" style="text-align: center; padding: 8px">…</div>
+      <div v-else-if="reachedTop && items.length && hasOlderOnServer" class="older">
+        <span>{{ t('chat.olderNotLoaded', { n: fmt.n(olderCount) }) }}</span>
+        <NButton size="small" type="primary" secondary @click="syncNow">{{ t('chat.loadAllHistory') }}</NButton>
+      </div>
+      <div v-if="fetching && items.length" class="fetch-pill"><NSpin :size="12" /> {{ t('chat.fetchingNew') }}</div>
       <template v-for="(m, i) in items" :key="m.id">
         <div v-if="i === 0 || dayOf(items[i - 1]) !== dayOf(m)" class="day"><span>{{ dayOf(m) }}</span></div>
         <MessageBubble :m="m" :show-sender="!!showSender" :whisper="app.modules.whisper" @download="downloadNow" @transcribe="transcribe" @jump="(id: number) => jumpTo({ around: id }, id)" />
@@ -283,4 +322,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
     box-shadow: 0 0 0 3px #2aabee;
   }
 }
+.fetching { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 60px 0; color: var(--text-2); }
+.older { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; margin: 8px auto 16px; padding: 10px 14px; max-width: 560px; border: 1px dashed var(--border-strong); border-radius: var(--radius); color: var(--text-2); font-size: 13px; }
+.fetch-pill { position: sticky; top: 8px; z-index: 2; margin: 0 auto; width: fit-content; display: flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; background: var(--bg-elev); border: 1px solid var(--border); box-shadow: var(--shadow-sm); font-size: 12px; color: var(--text-2); }
 </style>

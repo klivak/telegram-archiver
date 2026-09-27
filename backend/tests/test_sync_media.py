@@ -182,3 +182,21 @@ async def test_resync_with_changed_file_requeues_downloaded_media(svc: Services)
     row = await svc.db.fetchone("SELECT * FROM media")
     assert row["status"] == "pending" and row["sha256"] is None and row["bytes_done"] == 0
     assert row["file_name"] == "b.bin" and row["size"] == 20
+
+
+async def test_chat_preview_fetches_latest_without_moving_checkpoint(svc: Services) -> None:
+    await add_chat(svc)
+    client = FakeClient([make_msg(i, text=f"m{i}") for i in range(1, 251)], {})
+    use_client(svc, client)
+    job = await svc.engine.wait(await svc.engine.submit("chat_preview", {"chat_id": 2000}), timeout=30)
+    assert job["status"] == "done" and job["progress"]["result"]["fetched"] == 100
+    ids = [r["id"] for r in await svc.db.fetchall("SELECT id FROM messages WHERE chat_id=2000 ORDER BY id")]
+    assert ids[0] == 151 and ids[-1] == 250
+    assert not await svc.db.fetchone("SELECT 1 FROM sync_state WHERE chat_id=2000 AND last_message_id > 0")
+    # opening again only pulls what is new
+    client.messages.append(make_msg(251, text="new"))
+    job = await svc.engine.wait(await svc.engine.submit("chat_preview", {"chat_id": 2000}), timeout=30)
+    assert job["progress"]["result"]["fetched"] == 1
+    # the full sync still fetches the whole history from the start
+    await sync_chat_history(svc, Ctx(), 2000)  # type: ignore[arg-type]
+    assert await svc.db.scalar("SELECT count(*) FROM messages WHERE chat_id=2000") == 251

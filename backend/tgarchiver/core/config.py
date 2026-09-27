@@ -55,7 +55,7 @@ class Settings(BaseModel):
     media_concurrency: int = 3
     max_retries: int = 5
     use_takeout: bool = False  # Takeout needs a confirmation in the Telegram app; opt-in under Advanced
-    protected_content: bool = True  # owner decision: protected (noforwards) chats are archived by default; can be turned off in Settings
+    protected_content: bool = True  # noforwards chats are archived by default; can be turned off in Settings
     import_tg_folders: bool = True
     path_template: str = "{type}/{yyyy}-{mm}/{msgid}_{name}"
     download_window: str = ""  # "01:00-07:00" or empty

@@ -34,7 +34,7 @@ def register_all(svc: Services) -> None:
     from tgarchiver.miniapps.service import detect_job
     from tgarchiver.monitor.service import monitor_job
     from tgarchiver.sync.dialogs import sync_dialogs
-    from tgarchiver.sync.history import sync_history_job
+    from tgarchiver.sync.history import chat_preview_job, sync_history_job
     from tgarchiver.transcribe.whisper import transcribe_job
 
     e = svc.engine
@@ -46,6 +46,7 @@ def register_all(svc: Services) -> None:
     # Telegram-bound jobs share one "tg" lane where parallel runs would only fight over the rate limiter.
     e.register("sync_dialogs", bind(sync_dialogs), lane="dialogs")
     e.register("sync_history", bind(sync_history_job), lane="history")
+    e.register("chat_preview", bind(chat_preview_job), lane="preview")
     e.register("export", bind(export_job), lane="history")
     e.register("render", bind(render_job))
     e.register("download_media", bind(download_media_job), lane="media")

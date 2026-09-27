@@ -150,6 +150,24 @@ async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, cli
     return fetched
 
 
+PREVIEW_LIMIT = 100
+
+
+async def chat_preview_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
+    """Fetch the latest messages of one chat when it is opened, without touching the full-sync checkpoint."""
+    chat_id = int(ctx.params["chat_id"])
+    chat = await get_chat(svc, chat_id)
+    client = await svc.tg.authorized_client()
+    newest = int(await svc.db.scalar("SELECT max(id) FROM messages WHERE chat_id=?", (chat_id,)) or 0)
+    batch = await svc.tg.call(lambda: client.get_messages(input_peer(chat), limit=PREVIEW_LIMIT, min_id=newest))
+    batch = [m for m in batch if m is not None and m.id > newest]
+    if batch:
+        await store_batch(svc, chat_id, batch, (svc.tg.me or {}).get("id"), checkpoint=False)
+        await refresh_chat_counters(svc, chat_id)
+    svc.bus.emit("chat.preview", {"chat_id": chat_id, "fetched": len(batch)})
+    return {"fetched": len(batch)}
+
+
 async def refresh_chat_counters(svc: Services, chat_id: int) -> None:
     await svc.db.execute(
         "UPDATE chats SET stored_messages=(SELECT count(*) FROM messages WHERE chat_id=?), "
