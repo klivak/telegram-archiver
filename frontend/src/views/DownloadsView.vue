@@ -87,12 +87,12 @@ const doneBytes = (m: MediaItem) => live.value[m.id]?.bytes_done ?? (m.status ==
         <NTabs v-model:value="tab" type="line" animated>
       <NTabPane name="jobs" :tab="t('downloads.jobs', { n: fmt.n(jobs.active.length) })">
         <div class="small muted" style="margin: 4px 0 12px">⌨ {{ t('downloads.spaceHint') }}</div>
-        <div v-if="jobs.active.length" class="grid-cards" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))">
+        <div v-if="jobs.active.length" class="grid-cards" style="grid-template-columns: repeat(auto-fill, minmax(380px, 1fr))">
           <JobCard v-for="j in jobs.active" :key="j.id" :job="j" />
         </div>
         <NEmpty v-else :description="t('downloads.noActive')" style="margin: 30px 0" />
         <h3 v-if="history.length" class="muted">{{ t('downloads.history') }}</h3>
-        <div class="grid-cards" style="grid-template-columns: repeat(auto-fill, minmax(320px, 1fr))">
+        <div class="grid-cards" style="grid-template-columns: repeat(auto-fill, minmax(380px, 1fr))">
           <JobCard v-for="j in history" :key="j.id" :job="j" />
         </div>
       </NTabPane>

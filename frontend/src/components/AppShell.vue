@@ -23,6 +23,8 @@ const notification = useNotification()
 const booting = ref(true)
 const collapsed = ref(localStorage.getItem('tga.sider') === '1')
 watch(collapsed, (v) => localStorage.setItem('tga.sider', v ? '1' : '0'))
+// the tour points at menu items, so show the full sidebar while it runs
+const isCollapsed = computed(() => collapsed.value && !app.tutorialOpen)
 
 const bare = computed(() => route.meta.bare === true || !app.ready)
 
@@ -175,22 +177,22 @@ async function retryBackend() {
   <RouterView v-else-if="bare" v-slot="{ Component }">
     <Transition name="fade" mode="out-in"><component :is="Component" /></Transition>
   </RouterView>
-  <div v-else class="shell" :class="{ collapsed }">
+  <div v-else class="shell" :class="{ collapsed: isCollapsed }">
     <aside class="sider">
       <div class="brand" @click="router.push('/')">
         <img src="/logo.png" alt="" width="30" height="30" />
-        <span v-if="!collapsed" class="brand-name">Telegram Archiver</span>
+        <span v-if="!isCollapsed" class="brand-name">Telegram Archiver</span>
       </div>
-      <button class="collapse-btn" :title="collapsed ? t('nav.expand') : t('nav.collapse')" @click="collapsed = !collapsed">{{ collapsed ? '›' : '‹' }}</button>
+      <button class="collapse-btn" :title="isCollapsed ? t('nav.expand') : t('nav.collapse')" @click="collapsed = !isCollapsed">{{ isCollapsed ? '›' : '‹' }}</button>
       <nav class="nav" data-tour="nav">
         <div v-for="g in groups" :key="g.label" class="nav-group">
-          <div v-if="!collapsed" class="nav-label">{{ g.label }}</div>
+          <div v-if="!isCollapsed" class="nav-label">{{ g.label }}</div>
           <div v-else class="nav-sep"></div>
-          <NTooltip v-for="it in g.items" :key="it.key" placement="right" :disabled="!collapsed">
+          <NTooltip v-for="it in g.items" :key="it.key" placement="right" :disabled="!isCollapsed">
             <template #trigger>
               <button class="nav-item" :class="{ active: activeKey === it.key }" @click="router.push({ name: it.key })">
                 <span class="nav-icon">{{ it.icon }}</span>
-                <span v-if="!collapsed" class="nav-text">{{ t(`nav.${it.key}`) }}</span>
+                <span v-if="!isCollapsed" class="nav-text">{{ t(`nav.${it.key}`) }}</span>
                 <span v-if="it.badge" class="nav-badge num">{{ it.badge > 99 ? '99+' : it.badge }}</span>
               </button>
             </template>
@@ -199,32 +201,32 @@ async function retryBackend() {
         </div>
       </nav>
       <div class="sider-bottom">
-        <NTooltip placement="right" :disabled="!collapsed">
+        <NTooltip placement="right" :disabled="!isCollapsed">
           <template #trigger>
             <button class="nav-item" :class="{ active: activeKey === 'settings' }" @click="router.push({ name: 'settings' })">
-              <span class="nav-icon">⚙️</span><span v-if="!collapsed" class="nav-text">{{ t('nav.settings') }}</span>
+              <span class="nav-icon">⚙️</span><span v-if="!isCollapsed" class="nav-text">{{ t('nav.settings') }}</span>
             </button>
           </template>
           {{ t('nav.settings') }}
         </NTooltip>
-        <div class="tools" :class="{ vertical: collapsed }">
+        <div class="tools" :class="{ vertical: isCollapsed }">
           <NTooltip>
             <template #trigger>
               <button class="tool" data-testid="theme-toggle" @click="cycleTheme">
-                <span>{{ THEME_ICON[app.themePref] }}</span><span v-if="!collapsed" class="small">{{ t(`theme.${app.themePref}`) }}</span>
+                <span>{{ THEME_ICON[app.themePref] }}</span><span v-if="!isCollapsed" class="small">{{ t(`theme.${app.themePref}`) }}</span>
               </button>
             </template>
             {{ t('theme.toggle') }}
           </NTooltip>
           <NDropdown :options="helpMenu" placement="top-start" trigger="click" @select="onHelp">
-            <button class="tool" :title="t('nav.help')"><span>?</span><span v-if="!collapsed" class="small">{{ t('nav.help') }}</span></button>
+            <button class="tool" :title="t('nav.help')"><span>?</span><span v-if="!isCollapsed" class="small">{{ t('nav.help') }}</span></button>
           </NDropdown>
         </div>
         <div class="account" :title="meName">
           <div class="avatar">
             {{ initials(meName) }}<span class="dot" :class="app.wsConnected ? 'ok' : 'bad'" :title="app.wsConnected ? t('app.connected') : t('app.reconnecting')"></span>
           </div>
-          <div v-if="!collapsed" class="grow">
+          <div v-if="!isCollapsed" class="grow">
             <div class="acc-name ellipsis">{{ meName }}</div>
             <div class="small muted ellipsis">{{ me?.username ? '@' + me.username : app.wsConnected ? t('app.connected') : t('app.reconnecting') }}</div>
           </div>
@@ -322,6 +324,7 @@ async function retryBackend() {
   transition: opacity var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .sider:hover .collapse-btn,
+.shell.collapsed .collapse-btn,
 .collapse-btn:focus-visible {
   opacity: 1;
 }
