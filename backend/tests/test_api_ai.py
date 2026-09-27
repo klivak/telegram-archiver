@@ -164,3 +164,19 @@ async def test_ai_period_scope_and_voice_pretranscribe(svc: Services, monkeypatc
     job = await svc.engine.wait(jid)
     assert job["status"] == "done", job
     assert seen and "hello voice" in seen[0]
+
+
+def test_groq_gemini_providers_and_env_keys(client: TestClient, monkeypatch) -> None:
+    from tgarchiver.ai.providers import make_provider
+    from tgarchiver.core.env import env_secret
+
+    g = make_provider("groq", "", key="k", ollama_url="")
+    assert g.name == "groq" and "api.groq.com" in g.base_url and g.model == "llama-3.3-70b-versatile"
+    m = make_provider("gemini", "", key="k", ollama_url="")
+    assert "generativelanguage.googleapis.com" in m.base_url
+    monkeypatch.setenv("GROQ_API_KEY", "gk")
+    monkeypatch.setenv("GEMINI_API_KEY", "mk")
+    assert env_secret("ai_key_groq") == "gk" and env_secret("ai_key_gemini") == "mk"
+    r = client.get("/api/ai/providers", headers={"Authorization": f"Bearer {TOKEN}"})
+    ids = {p["id"]: p for p in r.json()["items"]}
+    assert {"groq", "gemini", "ollama"} <= ids.keys() and ids["ollama"]["ready"]

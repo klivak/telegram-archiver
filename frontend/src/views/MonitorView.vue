@@ -88,7 +88,7 @@ async function runAi() {
     router.push({ path: '/settings', query: { tab: 'ai' } })
     return
   }
-  await api.post('/ai/run', { task: task.value, scope: scope.value, question: question.value, refresh_unread: scopeKind.value === 'unread', transcribe_voice: canTranscribe.value && transcribeVoice.value })
+  await api.post('/ai/run', { task: task.value, scope: scope.value, question: question.value, provider: provider.value, refresh_unread: scopeKind.value === 'unread', transcribe_voice: canTranscribe.value && transcribeVoice.value })
   message.info(t('monitor.aiStarted'))
 }
 async function deleteReport(id: number) {
@@ -107,7 +107,14 @@ function askNotify() {
   if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission()
 }
 
-const cloud = computed(() => app.settings?.ai.provider !== 'ollama')
+const providers = ref<{ id: string; default_model: string; ready: boolean }[]>([])
+const provider = ref<string | null>(null) // null = the one from Settings
+const effectiveProvider = computed(() => provider.value ?? app.settings?.ai.provider)
+const providerOptions = computed(() => providers.value.map((p) => ({ label: `${providerLabel(p.id)}${p.ready ? '' : ` (${t('ai.noKey')})`}`, value: p.id, disabled: !p.ready })))
+function providerLabel(id: string) {
+  return ({ ollama: 'Ollama', anthropic: 'Anthropic', openai: 'OpenAI', openrouter: 'OpenRouter', groq: 'Groq', gemini: 'Gemini' } as Record<string, string>)[id] ?? id
+}
+const cloud = computed(() => effectiveProvider.value !== 'ollama')
 const lastRunAgo = computed(() => {
   if (!lastRun.value) return ''
   const d = formatDuration((Date.now() - Date.parse(lastRun.value)) / 1000)
@@ -121,6 +128,7 @@ let offs: (() => void)[] = []
 onMounted(() => {
   loadUnread()
   loadReports()
+  api.get<{ items: { id: string; default_model: string; ready: boolean }[] }>('/ai/providers').then((r) => (providers.value = r.items))
   offs = [events.on('monitor.updated', loadUnread), events.on('ai.report', (ev) => loadReports().then(() => openReport(ev.data.id)))]
 })
 onBeforeUnmount(() => offs.forEach((f) => f()))
@@ -162,6 +170,7 @@ onBeforeUnmount(() => offs.forEach((f) => f()))
             <NSelect v-if="scopeKind !== 'unread'" v-model:value="period" :options="['1', '3', '7', '30', 'custom'].map((x) => ({ label: t(`ai.period.${x}`), value: x }))" style="width: 150px" size="small" />
             <NDatePicker v-if="scopeKind !== 'unread' && period === 'custom'" v-model:value="range" type="daterange" size="small" clearable />
             <NCheckbox v-if="canTranscribe" v-model:checked="transcribeVoice" size="small">{{ t('ai.transcribeVoice') }}</NCheckbox>
+            <NSelect v-model:value="provider" :options="providerOptions" :placeholder="providerLabel(app.settings?.ai.provider ?? '')" clearable style="width: 170px" size="small" />
             <NButton size="small" @click="doEstimate">{{ t('ai.estimate') }}</NButton>
             <NButton size="small" type="primary" @click="runAi">✨ {{ t('ai.run') }}</NButton>
           </NSpace>

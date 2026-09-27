@@ -163,7 +163,7 @@ export interface Settings {
   tutorial_done: boolean
   advanced_mode: boolean
   whisper: { enabled: boolean; model: string; device: string; compute_type: string; beam_size: number; language: string; auto: boolean; auto_chat_ids: number[] }
-  ai: { enabled: boolean; provider: 'ollama' | 'anthropic' | 'openai' | 'openrouter'; model: string; ollama_url: string; mask_pii: boolean; daily_token_limit: number; schedule_time: string; prompts: Record<string, string> }
+  ai: { enabled: boolean; provider: 'ollama' | 'anthropic' | 'openai' | 'openrouter' | 'groq' | 'gemini'; model: string; ollama_url: string; mask_pii: boolean; daily_token_limit: number; schedule_time: string; prompts: Record<string, string> }
   monitor: { enabled: boolean; interval_min: number; chat_ids: number[]; folder_ids: number[]; ignore_chat_ids: number[]; mentions_only: boolean; mark_read_after: boolean; stay_offline: boolean }
   secrets: Record<string, boolean>
 }

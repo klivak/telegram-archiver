@@ -16,7 +16,7 @@ const message = useMessage()
 const dialog = useDialog()
 const tab = ref((route.query.tab as string) || 'general')
 const form = ref<Settings | null>(null)
-const keys = ref<Record<string, string>>({ ai_key_anthropic: '', ai_key_openai: '', ai_key_openrouter: '' })
+const keys = ref<Record<string, string>>({ ai_key_anthropic: '', ai_key_openai: '', ai_key_openrouter: '', ai_key_groq: '', ai_key_gemini: '' })
 const prompts = ref<{ defaults: Record<string, string>; overrides: Record<string, string> } | null>(null)
 const saving = ref(false)
 const version = ref('')
@@ -40,7 +40,7 @@ async function save() {
     void _a
     await app.saveSettings(patch)
     for (const [k, v] of Object.entries(keys.value)) if (v) await api.post('/settings/secret', { key: k, value: v })
-    keys.value = { ai_key_anthropic: '', ai_key_openai: '', ai_key_openrouter: '' }
+    keys.value = { ai_key_anthropic: '', ai_key_openai: '', ai_key_openrouter: '', ai_key_groq: '', ai_key_gemini: '' }
     await app.loadSettings()
     form.value = JSON.parse(JSON.stringify(app.settings))
     message.success(t('settings.saved'))
@@ -113,6 +113,13 @@ const scheduleTs = computed({
 const chatOptions = computed(() => chats.items.map((c) => ({ label: c.title, value: c.id })))
 const folderOptions = computed(() => chats.folders.map((f) => ({ label: f.name, value: f.id })))
 const whisperModels = ['tiny', 'base', 'small', 'medium', 'large-v3', 'large-v3-turbo'].map((v) => ({ label: v, value: v }))
+const defaultModels = ref<Record<string, string>>({})
+onMounted(async () => {
+  const r = await api.get<{ items: { id: string; default_model: string }[] }>('/ai/providers')
+  defaultModels.value = Object.fromEntries(r.items.map((p) => [p.id, p.default_model]))
+})
+// a model name belongs to one provider: reset it so the new provider's default is used
+watch(() => form.value?.ai.provider, (p, old) => { if (form.value && old && p !== old) form.value.ai.model = '' })
 const keyName = computed(() => (form.value ? `ai_key_${form.value.ai.provider}` : ''))
 </script>
 
@@ -189,9 +196,11 @@ const keyName = computed(() => (form.value ? `ai_key_${form.value.ai.provider}` 
               <NRadioButton value="anthropic">Anthropic</NRadioButton>
               <NRadioButton value="openai">OpenAI</NRadioButton>
               <NRadioButton value="openrouter">OpenRouter</NRadioButton>
+              <NRadioButton value="groq">Groq</NRadioButton>
+              <NRadioButton value="gemini">Gemini</NRadioButton>
             </NRadioGroup>
           </NFormItem>
-          <NFormItem :label="t('settings.aiModel')" :feedback="t('settings.aiModelHint')"><NInput v-model:value="form.ai.model" /></NFormItem>
+          <NFormItem :label="t('settings.aiModel')" :feedback="t('settings.aiModelHint')"><NInput v-model:value="form.ai.model" :placeholder="defaultModels[form.ai.provider] ?? ''" /></NFormItem>
           <NFormItem v-if="form.ai.provider === 'ollama'" label="Ollama URL"><NInput v-model:value="form.ai.ollama_url" /></NFormItem>
           <NFormItem v-else :label="t('settings.aiKey')" :feedback="form.secrets[keyName] ? t('settings.keyStored') : t('settings.keyHint')">
             <NInput v-model:value="keys[keyName]" type="password" show-password-on="click" :placeholder="form.secrets[keyName] ? '••••••••' : ''" />

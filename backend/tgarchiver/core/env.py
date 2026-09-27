@@ -15,6 +15,8 @@ SECRET_ENV = {
     "ai_key_anthropic": "ANTHROPIC_API_KEY",
     "ai_key_openai": "OPENAI_API_KEY",
     "ai_key_openrouter": "OPENROUTER_API_KEY",
+    "ai_key_groq": "GROQ_API_KEY",
+    "ai_key_gemini": "GEMINI_API_KEY",
 }
 
 

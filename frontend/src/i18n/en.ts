@@ -394,6 +394,7 @@ const en: typeof uk = {
     task: { digest: 'Digest', priorities: 'Priorities', action_items: 'Action items', topics: 'Topics & trends', qa: 'Ask the archive' },
     scope: { unread: 'Unread', days: 'All chats for a period', folder: 'Folder for a period', chats: 'Selected chats for a period' },
     period: { '1': 'Last 24 hours', '3': '3 days', '7': '7 days', '30': '30 days', custom: 'Custom range…' },
+    noKey: 'no key',
     transcribeVoice: 'Transcribe voice messages first (Whisper)',
     voiceWillTranscribe: 'Voice messages without text: {n} - they will be transcribed before analysis.',
     voiceSkipped: 'Voice messages without text: {n} - their content will not be analyzed.',

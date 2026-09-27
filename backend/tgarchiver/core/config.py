@@ -25,7 +25,7 @@ class WhisperSettings(BaseModel):
 
 class AISettings(BaseModel):
     enabled: bool = False
-    provider: Literal["ollama", "anthropic", "openai", "openrouter"] = "ollama"
+    provider: Literal["ollama", "anthropic", "openai", "openrouter", "groq", "gemini"] = "ollama"
     model: str = ""
     ollama_url: str = "http://127.0.0.1:11434"
     mask_pii: bool = True

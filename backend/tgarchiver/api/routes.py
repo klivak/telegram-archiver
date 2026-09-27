@@ -105,7 +105,7 @@ async def auth_logout(request: Request) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ settings
-SECRET_KEYS = {"ai_key_anthropic", "ai_key_openai", "ai_key_openrouter"}
+SECRET_KEYS = {"ai_key_anthropic", "ai_key_openai", "ai_key_openrouter", "ai_key_groq", "ai_key_gemini"}
 
 
 @router.get("/settings")
@@ -820,6 +820,15 @@ async def ai_estimate(request: Request, body: AIRunIn) -> dict[str, Any]:
     from tgarchiver.ai.pipeline import estimate_job_tokens
 
     return await estimate_job_tokens(S(request), body.scope)
+
+
+@router.get("/ai/providers")
+async def ai_providers(request: Request) -> dict[str, Any]:
+    from tgarchiver.ai.providers import DEFAULT_MODELS, KEY_NAMES
+
+    svc = S(request)
+    return {"items": [{"id": p, "default_model": m, "ready": p not in KEY_NAMES or svc.secrets.has(KEY_NAMES[p])}
+                      for p, m in DEFAULT_MODELS.items()]}
 
 
 @router.get("/ai/prompts")

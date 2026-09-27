@@ -1,4 +1,4 @@
-"""Pluggable LLM providers over plain HTTP (httpx): Ollama (local), Anthropic, OpenAI, OpenRouter."""
+"""Pluggable LLM providers over plain HTTP (httpx): Ollama (local), Anthropic, OpenAI, OpenRouter, Groq, Gemini."""
 
 from __future__ import annotations
 
@@ -12,9 +12,18 @@ DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-5",
     "openai": "gpt-4.1-mini",
     "openrouter": "anthropic/claude-sonnet-5",
+    "groq": "llama-3.3-70b-versatile",
+    "gemini": "gemini-2.5-flash",
 }
-KEY_NAMES = {"anthropic": "ai_key_anthropic", "openai": "ai_key_openai", "openrouter": "ai_key_openrouter"}
-CONTEXT_TOKENS = {"ollama": 6000, "anthropic": 60000, "openai": 30000, "openrouter": 30000}
+KEY_NAMES = {"anthropic": "ai_key_anthropic", "openai": "ai_key_openai", "openrouter": "ai_key_openrouter",
+             "groq": "ai_key_groq", "gemini": "ai_key_gemini"}
+# Groq free tier has low tokens-per-minute limits, so keep its chunks small.
+CONTEXT_TOKENS = {"ollama": 6000, "anthropic": 60000, "openai": 30000, "openrouter": 30000, "groq": 8000,
+                  "gemini": 60000}
+# OpenAI-compatible endpoints
+BASE_URLS = {"openai": "https://api.openai.com/v1", "openrouter": "https://openrouter.ai/api/v1",
+             "groq": "https://api.groq.com/openai/v1",
+             "gemini": "https://generativelanguage.googleapis.com/v1beta/openai"}
 
 
 @dataclass
@@ -107,6 +116,6 @@ def make_provider(provider: str, model: str, *, key: str | None, ollama_url: str
         raise ValueError("ai_key_missing")
     if provider == "anthropic":
         return AnthropicProvider(model, key)
-    if provider == "openrouter":
-        return OpenAICompatProvider(model, key, "https://openrouter.ai/api/v1", "openrouter")
-    return OpenAICompatProvider(model, key)
+    if provider in BASE_URLS:
+        return OpenAICompatProvider(model, key, BASE_URLS[provider], provider)
+    raise ValueError("unknown_provider")

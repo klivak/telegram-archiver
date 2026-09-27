@@ -193,7 +193,8 @@ async def ai_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
     s = svc.settings.ai
     provider_name = p.get("provider") or s.provider
     key = svc.secrets.get(KEY_NAMES[provider_name]) if provider_name in KEY_NAMES else None
-    provider = make_provider(provider_name, p.get("model") or s.model, key=key, ollama_url=s.ollama_url)
+    model = p.get("model") or (s.model if provider_name == s.provider else "")
+    provider = make_provider(provider_name, model, key=key, ollama_url=s.ollama_url)
     scope = p.get("scope") or {"unread": True}
     if p.get("refresh_unread"):
         from tgarchiver.monitor.service import monitor_job
