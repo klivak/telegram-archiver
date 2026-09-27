@@ -231,6 +231,11 @@ const en: typeof uk = {
     deleteText: 'Folder "{name}" will be deleted. Chats stay in the archive.',
   },
   export: {
+    periodTitle: 'Period',
+    periodHint: 'Which time range to save',
+    period: { all: 'All time', today: 'Today', '7d': '7 days', '30d': '30 days', '3m': '3 months', '1y': '1 year', thisYear: 'This year', lastYear: 'Last year', custom: 'Custom dates' },
+    dateFrom: 'From',
+    dateTo: 'To',
     title: 'Export chats: {n}',
     loadPreset: 'Load a preset…',
     whatMedia: 'What to download',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { NAlert, NButton, NCheckbox, NCheckboxGroup, NCollapse, NCollapseItem, NDatePicker, NDivider, NDrawer, NDrawerContent, NDynamicTags, NForm, NFormItem, NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCheckbox, NCollapse, NCollapseItem, NDatePicker, NDivider, NDrawer, NDrawerContent, NDynamicTags, NForm, NFormItem, NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTag, useDialog, useMessage } from 'naive-ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useFormat } from '@/composables/format'
@@ -35,6 +35,53 @@ const defaults = (): ExportRequest => ({
 })
 const form = ref<ExportRequest>(defaults())
 const dateRange = ref<[number, number] | null>(null)
+type PeriodPreset = 'all' | 'today' | '7d' | '30d' | '3m' | '1y' | 'thisYear' | 'lastYear' | 'custom'
+const PERIODS: PeriodPreset[] = ['all', 'today', '7d', '30d', '3m', '1y', 'thisYear', 'lastYear', 'custom']
+const period = ref<PeriodPreset>('all')
+const dayStart = (y: number, m: number, d: number) => new Date(y, m, d).getTime()
+function periodRange(p: PeriodPreset): [number, number] | null {
+  const n = new Date()
+  const [y, m, d] = [n.getFullYear(), n.getMonth(), n.getDate()]
+  const today = dayStart(y, m, d)
+  switch (p) {
+    case 'today': return [today, today]
+    case '7d': return [dayStart(y, m, d - 6), today]
+    case '30d': return [dayStart(y, m, d - 29), today]
+    case '3m': return [dayStart(y, m - 3, d), today]
+    case '1y': return [dayStart(y - 1, m, d), today]
+    case 'thisYear': return [dayStart(y, 0, 1), today]
+    case 'lastYear': return [dayStart(y - 1, 0, 1), dayStart(y - 1, 11, 31)]
+    default: return null
+  }
+}
+function pickPeriod(p: PeriodPreset) {
+  period.value = p
+  if (p !== 'custom') dateRange.value = periodRange(p)
+}
+// the same presets inside the calendar popup
+const pickerShortcuts = computed(() => Object.fromEntries(PERIODS.filter((p) => p !== 'all' && p !== 'custom').map((p) => [t(`export.period.${p}`), () => periodRange(p) as [number, number]])))
+function onRangePicked(v: [number, number] | null) {
+  dateRange.value = v
+  period.value = v ? 'custom' : 'all'
+}
+const localDay = (ms: number) => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+function toggleMedia(m: MediaType) {
+  const set = new Set(form.value.media_types)
+  if (set.has(m)) set.delete(m)
+  else set.add(m)
+  form.value.media_types = MEDIA_TYPES.filter((x) => set.has(x))
+}
+function toggleFormat(f: (typeof FORMATS)[number]) {
+  const set = new Set(form.value.formats)
+  if (set.has(f)) {
+    if (set.size > 1) set.delete(f)
+  } else set.add(f)
+  form.value.formats = FORMATS.filter((x) => set.has(x))
+}
+const MEDIA_ICONS: Record<string, string> = { photo: '🖼️', video: '🎬', round: '⭕', voice: '🎙️', audio: '🎵', document: '📄', sticker: '🏷️', gif: '🎞️' }
 const estimate = ref<{ media: { count: number; bytes: number; by_type: Record<string, { count: number; bytes: number; done: number }> }; unsynced_chats: number; messages: number; protected_chats: number; protected_enabled: boolean } | null>(null)
 const busy = ref(false)
 const presetName = ref('')
@@ -52,8 +99,9 @@ watch(
   },
 )
 watch(dateRange, (r) => {
-  form.value.filters.date_from = r ? new Date(r[0]).toISOString().slice(0, 10) : null
-  form.value.filters.date_to = r ? new Date(r[1]).toISOString().slice(0, 10) : null
+  // local calendar days (toISOString would shift the date by the UTC offset)
+  form.value.filters.date_from = r ? localDay(r[0]) : null
+  form.value.filters.date_to = r ? localDay(r[1]) : null
 })
 const refreshEstimate = debounce(async () => {
   if (!props.chatIds.length) return
@@ -118,87 +166,135 @@ const fromSel = computed({
 </script>
 
 <template>
-  <NDrawer :show="show" :width="520" placement="right" @update:show="(v: boolean) => emit('update:show', v)">
-    <NDrawerContent :title="t('export.title', { n: chatIds.length })" closable>
-      <NSpace vertical size="large">
-        <div>
-          <NTag v-for="c in selected.slice(0, 12)" :key="c!.id" size="small" style="margin: 0 4px 4px 0">{{ c!.noforwards ? '🔒 ' : '' }}{{ c!.title }}</NTag>
-          <span v-if="selected.length > 12" class="small muted">+{{ selected.length - 12 }}</span>
-        </div>
-        <NSelect v-if="presetOptions.length" :options="presetOptions" :placeholder="t('export.loadPreset')" clearable @update:value="applyPreset" />
+  <NDrawer :show="show" :width="560" placement="right" @update:show="(v: boolean) => emit('update:show', v)">
+    <NDrawerContent :title="t('export.title', { n: fmt.n(chatIds.length) })" closable :native-scrollbar="false">
+      <div class="xw-chips">
+        <NTag v-for="c in selected.slice(0, 12)" :key="c!.id" size="small" round :bordered="false">{{ c!.noforwards ? '🔒 ' : '' }}{{ c!.title }}</NTag>
+        <span v-if="selected.length > 12" class="small muted">+{{ fmt.n(selected.length - 12) }}</span>
+      </div>
+      <NSelect v-if="presetOptions.length" :options="presetOptions" :placeholder="t('export.loadPreset')" clearable size="small" style="margin-bottom: 12px" @update:value="applyPreset" />
 
-        <div data-tour="export-media">
-          <div class="row" style="justify-content: space-between">
+      <section class="xw-card">
+        <header>
+          <span class="xw-ico">📅</span>
+          <div class="grow"><strong>{{ t('export.periodTitle') }}</strong><div class="small muted">{{ t('export.periodHint') }}</div></div>
+        </header>
+        <div class="xw-pills">
+          <button v-for="p in PERIODS" :key="p" type="button" class="xw-pill" :class="{ on: period === p }" @click="pickPeriod(p)">{{ t(`export.period.${p}`) }}</button>
+        </div>
+        <Transition name="xw-fade">
+          <NDatePicker v-if="period !== 'all'" :value="dateRange" type="daterange" clearable :shortcuts="pickerShortcuts" :start-placeholder="t('export.dateFrom')" :end-placeholder="t('export.dateTo')" style="margin-top: 10px; width: 100%" @update:value="onRangePicked" />
+        </Transition>
+      </section>
+
+      <section class="xw-card" data-tour="export-media">
+        <header>
+          <span class="xw-ico">🗂️</span>
+          <div class="grow">
             <strong>{{ t('export.whatMedia') }}</strong>
-            <NSwitch v-model:value="form.no_media"><template #checked>{{ t('export.noMedia') }}</template><template #unchecked>{{ t('export.withMedia') }}</template></NSwitch>
+            <div v-if="estimate && !form.no_media" class="small muted">{{ t('export.estimate', { n: fmt.n(estimate.media.count), size: formatBytes(estimate.media.bytes) }) }}</div>
           </div>
-          <NCheckboxGroup v-if="!form.no_media" v-model:value="form.media_types" style="margin-top: 8px">
-            <NSpace>
-              <NCheckbox v-for="m in MEDIA_TYPES" :key="m" :value="m" :label="mediaLabel(m)" />
-            </NSpace>
-          </NCheckboxGroup>
-          <div v-if="estimate" class="small muted" style="margin-top: 6px">
-            <template v-if="!form.no_media">{{ t('export.estimate', { n: fmt.n(estimate.media.count), size: formatBytes(estimate.media.bytes) }) }}</template>
-            <template v-if="estimate.unsynced_chats"> · {{ t('export.estimateUnsynced', { n: fmt.n(estimate.unsynced_chats) }) }}</template>
-          </div>
+          <NSwitch v-model:value="form.no_media" size="small"><template #checked>{{ t('export.noMedia') }}</template><template #unchecked>{{ t('export.withMedia') }}</template></NSwitch>
+        </header>
+        <div v-if="!form.no_media" class="xw-grid">
+          <button v-for="m in MEDIA_TYPES" :key="m" type="button" class="xw-tile" :class="{ on: form.media_types.includes(m) }" @click="toggleMedia(m)">
+            <span class="xw-tile-ico">{{ MEDIA_ICONS[m] }}</span>
+            <span class="xw-tile-name">{{ mediaLabel(m) }}</span>
+            <span v-if="estimate?.media.by_type[m]" class="xw-tile-sub">{{ fmt.compact(estimate.media.by_type[m].count) }} · {{ formatBytes(estimate.media.by_type[m].bytes) }}</span>
+          </button>
         </div>
+        <div v-if="estimate?.unsynced_chats" class="small muted" style="margin-top: 8px">{{ t('export.estimateUnsynced', { n: fmt.n(estimate.unsynced_chats) }) }}</div>
+      </section>
 
-        <div>
-          <strong>{{ t('export.format') }}</strong>
-          <NCheckboxGroup v-model:value="form.formats" style="margin-top: 8px">
-            <NSpace>
-              <NCheckbox v-for="f in FORMATS" :key="f" :value="f" :label="t(`formats.${f}`)" />
-            </NSpace>
-          </NCheckboxGroup>
+      <section class="xw-card">
+        <header><span class="xw-ico">📝</span><strong>{{ t('export.format') }}</strong></header>
+        <div class="xw-pills">
+          <button v-for="f in FORMATS" :key="f" type="button" class="xw-pill" :class="{ on: form.formats.includes(f) }" @click="toggleFormat(f)">{{ t(`formats.${f}`) }}</button>
         </div>
+      </section>
 
-        <div data-tour="export-split">
-          <strong>{{ t('export.split') }}</strong>
-          <NRadioGroup v-model:value="form.split.mode" size="small" style="margin-top: 8px; display: flex; flex-wrap: wrap">
-            <NRadioButton v-for="s in SPLIT_MODES" :key="s" :value="s" :label="t(`split.${s}`)" />
-          </NRadioGroup>
-          <div class="small muted" style="margin-top: 4px">{{ t(`splitHint.${form.split.mode}`) }}</div>
-          <NFormItem v-if="form.split.mode === 'size'" :label="t('export.partSize')" label-placement="left" style="margin-top: 8px">
-            <NInputNumber v-model:value="form.split.size_mb" :min="0.1" :step="1" style="width: 140px"><template #suffix>MB</template></NInputNumber>
-          </NFormItem>
-          <NSpace v-if="form.split.mode === 'llm'" style="margin-top: 8px">
-            <NInputNumber v-model:value="form.split.tokens" :min="1000" :step="10000" style="width: 170px"><template #suffix>{{ t('export.tokens') }}</template></NInputNumber>
-            <NInputNumber v-model:value="form.split.overlap" :min="0" :max="200" style="width: 150px"><template #suffix>{{ t('export.overlap') }}</template></NInputNumber>
-          </NSpace>
-          <NCheckbox v-if="form.split.mode !== 'single'" v-model:checked="form.also_full" style="margin-top: 8px">{{ t('export.alsoFull') }}</NCheckbox>
+      <section class="xw-card" data-tour="export-split">
+        <header>
+          <span class="xw-ico">✂️</span>
+          <div class="grow"><strong>{{ t('export.split') }}</strong><div class="small muted">{{ t(`splitHint.${form.split.mode}`) }}</div></div>
+        </header>
+        <div class="xw-pills">
+          <button v-for="sm in SPLIT_MODES" :key="sm" type="button" class="xw-pill" :class="{ on: form.split.mode === sm }" @click="form.split.mode = sm">{{ t(`split.${sm}`) }}</button>
         </div>
+        <NFormItem v-if="form.split.mode === 'size'" :label="t('export.partSize')" label-placement="left" :show-feedback="false" style="margin-top: 10px">
+          <NInputNumber v-model:value="form.split.size_mb" :min="0.1" :step="1" style="width: 140px"><template #suffix>MB</template></NInputNumber>
+        </NFormItem>
+        <NSpace v-if="form.split.mode === 'llm'" style="margin-top: 10px">
+          <NInputNumber v-model:value="form.split.tokens" :min="1000" :step="10000" style="width: 170px"><template #suffix>{{ t('export.tokens') }}</template></NInputNumber>
+          <NInputNumber v-model:value="form.split.overlap" :min="0" :max="200" style="width: 150px"><template #suffix>{{ t('export.overlap') }}</template></NInputNumber>
+        </NSpace>
+        <NCheckbox v-if="form.split.mode !== 'single'" v-model:checked="form.also_full" style="margin-top: 10px">{{ t('export.alsoFull') }}</NCheckbox>
+      </section>
 
-        <NCollapse>
-          <NCollapseItem :title="t('common.advanced')" name="adv">
-            <NForm label-placement="left" label-width="auto" size="small">
-              <NFormItem :label="t('export.dates')"><NDatePicker v-model:value="dateRange" type="daterange" clearable /></NFormItem>
-              <NFormItem :label="t('export.maxSize')"><NInputNumber v-model:value="form.filters.max_size_mb" :min="0" clearable style="width: 160px"><template #suffix>MB</template></NInputNumber></NFormItem>
-              <NFormItem :label="t('export.from')">
-                <NRadioGroup v-model:value="fromSel" size="small">
-                  <NRadioButton value="all" :label="t('export.fromAll')" />
-                  <NRadioButton value="me" :label="t('export.fromMe')" />
-                  <NRadioButton value="others" :label="t('export.fromOthers')" />
-                </NRadioGroup>
-              </NFormItem>
-              <NFormItem :label="t('export.extensions')"><NDynamicTags v-model:value="form.filters.extensions" /></NFormItem>
-              <NFormItem :label="t('export.transcripts')"><NSwitch v-model:value="form.include_transcripts" /></NFormItem>
-              <NFormItem :label="t('export.takeout')"><NSwitch :value="form.takeout ?? app.settings?.use_takeout ?? false" @update:value="(v: boolean) => (form.takeout = v)" /></NFormItem>
-              <div class="small muted">{{ t('export.takeoutHint') }}</div>
-            </NForm>
-          </NCollapseItem>
-        </NCollapse>
+      <NCollapse>
+        <NCollapseItem :title="t('common.advanced')" name="adv">
+          <NForm label-placement="left" label-width="auto" size="small">
+            <NFormItem :label="t('export.maxSize')"><NInputNumber v-model:value="form.filters.max_size_mb" :min="0" clearable style="width: 160px"><template #suffix>MB</template></NInputNumber></NFormItem>
+            <NFormItem :label="t('export.from')">
+              <NRadioGroup v-model:value="fromSel" size="small">
+                <NRadioButton value="all" :label="t('export.fromAll')" />
+                <NRadioButton value="me" :label="t('export.fromMe')" />
+                <NRadioButton value="others" :label="t('export.fromOthers')" />
+              </NRadioGroup>
+            </NFormItem>
+            <NFormItem :label="t('export.extensions')"><NDynamicTags v-model:value="form.filters.extensions" /></NFormItem>
+            <NFormItem :label="t('export.transcripts')"><NSwitch v-model:value="form.include_transcripts" /></NFormItem>
+            <NFormItem :label="t('export.takeout')"><NSwitch :value="form.takeout ?? app.settings?.use_takeout ?? false" @update:value="(v: boolean) => (form.takeout = v)" /></NFormItem>
+            <div class="small muted">{{ t('export.takeoutHint') }}</div>
+            <NDivider style="margin: 12px 0" />
+            <div class="row">
+              <NInput v-model:value="presetName" size="small" :placeholder="t('export.presetName')" />
+              <NButton size="small" :disabled="!presetName.trim()" @click="savePreset">{{ t('export.savePreset') }}</NButton>
+            </div>
+          </NForm>
+        </NCollapseItem>
+      </NCollapse>
 
-        <NAlert v-if="estimate?.protected_chats && !app.settings?.protected_content" type="warning" :show-icon="true">{{ t('export.protectedWarn', { n: estimate.protected_chats }) }}</NAlert>
+      <NAlert v-if="estimate?.protected_chats && !app.settings?.protected_content" type="warning" :show-icon="true" style="margin-top: 12px">{{ t('export.protectedWarn', { n: fmt.n(estimate.protected_chats) }) }}</NAlert>
 
-        <NDivider style="margin: 4px 0" />
-        <div class="row">
-          <NInput v-model:value="presetName" size="small" :placeholder="t('export.presetName')" />
-          <NButton size="small" :disabled="!presetName.trim()" @click="savePreset">{{ t('export.savePreset') }}</NButton>
-        </div>
-      </NSpace>
       <template #footer>
-        <NButton type="primary" size="large" block :loading="busy" :disabled="!chatIds.length || !form.formats.length" @click="start">{{ t('export.start') }}</NButton>
+        <div class="xw-foot">
+          <div class="xw-sum small">
+            <span>💬 {{ fmt.n(chatIds.length) }}</span>
+            <span>📅 {{ period === 'custom' && form.filters.date_from ? `${form.filters.date_from} - ${form.filters.date_to}` : t(`export.period.${period}`) }}</span>
+            <span v-if="!form.no_media && estimate">📦 {{ fmt.compact(estimate.media.count) }} · {{ formatBytes(estimate.media.bytes) }}</span>
+          </div>
+          <NButton type="primary" size="large" block :loading="busy" :disabled="!chatIds.length || !form.formats.length" @click="start">{{ t('export.start') }}</NButton>
+        </div>
       </template>
     </NDrawerContent>
   </NDrawer>
 </template>
+
+<style scoped>
+.xw-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.xw-card { border: 1px solid var(--border); background: var(--bg-elev); border-radius: var(--radius-lg); padding: 14px; margin-bottom: 12px; transition: border-color var(--dur) var(--ease); }
+.xw-card:hover { border-color: var(--border-strong); }
+.xw-card > header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.xw-ico { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 8px; background: var(--accent-soft); font-size: 15px; }
+.grow { flex: 1; min-width: 0; }
+.xw-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.xw-pill { font: inherit; font-size: 13px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text-2); cursor: pointer; transition: all var(--dur) var(--ease); }
+.xw-pill:hover { border-color: var(--border-strong); color: var(--text); }
+.xw-pill.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+.xw-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.xw-tile { font: inherit; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 6px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg-sunken); color: var(--text-2); cursor: pointer; transition: all var(--dur) var(--ease); }
+.xw-tile:hover { border-color: var(--border-strong); transform: translateY(-1px); }
+.xw-tile.on { background: var(--accent-soft); border-color: var(--accent); color: var(--text); }
+.xw-tile-ico { font-size: 20px; line-height: 1.2; filter: grayscale(0.7); opacity: 0.6; transition: all var(--dur) var(--ease); }
+.xw-tile.on .xw-tile-ico { filter: none; opacity: 1; }
+.xw-tile-name { font-size: 12.5px; font-weight: 500; }
+.xw-tile-sub { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.xw-foot { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.xw-sum { display: flex; flex-wrap: wrap; gap: 14px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.xw-fade-enter-active, .xw-fade-leave-active { transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.xw-fade-enter-from, .xw-fade-leave-to { opacity: 0; transform: translateY(-4px); }
+@media (max-width: 600px) { .xw-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (prefers-reduced-motion: reduce) { .xw-tile:hover { transform: none; } }
+</style>
+

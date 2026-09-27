@@ -230,6 +230,11 @@ export default {
     deleteText: 'Тека «{name}» буде видалена. Чати залишаться в архіві.',
   },
   export: {
+    periodTitle: 'Період',
+    periodHint: 'За який час зберегти повідомлення',
+    period: { all: 'Весь час', today: 'Сьогодні', '7d': '7 днів', '30d': '30 днів', '3m': '3 місяці', '1y': 'Рік', thisYear: 'Цей рік', lastYear: 'Минулий рік', custom: 'Свої дати' },
+    dateFrom: 'З дати',
+    dateTo: 'По дату',
     title: 'Експорт чатів: {n}',
     loadPreset: 'Завантажити пресет…',
     whatMedia: 'Що качати',
