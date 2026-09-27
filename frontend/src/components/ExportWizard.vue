@@ -272,12 +272,14 @@ const fromSel = computed({
       <section v-if="estimate" class="xw-plan">
         <strong>{{ t('export.planTitle') }}</strong>
         <ol>
-          <li v-if="toFetch">{{ t('export.planFetch', { n: fmt.n(toFetch) }) }}</li>
+          <li v-if="form.filters.date_from">{{ t('export.planFetchPeriod') }}</li>
+          <li v-else-if="toFetch">{{ t('export.planFetch', { n: fmt.n(toFetch) }) }}</li>
           <li v-else>{{ t('export.planHave', { n: fmt.n(estimate.messages) }) }}</li>
           <li>{{ t('export.planWrite', { formats: form.formats.map((f) => t(`formats.${f}`)).join(', '), split: t(`split.${form.split.mode}`).toLowerCase() }) }}</li>
           <li v-if="form.no_media">{{ t('export.planNoMedia') }}</li>
-          <li v-else-if="estimate.media.count">{{ t('export.planMedia', { n: fmt.n(estimate.media.count - mediaDone), size: formatBytes(estimate.media.bytes), done: fmt.n(mediaDone) }) }}</li>
-          <li v-else>{{ t('export.planMediaNone') }}</li>
+          <li v-else-if="estimate.media.count || catalogPartial">{{ t('export.planMediaParallel') }}</li>
+          <li v-if="!form.no_media && estimate.media.count">{{ t('export.planMedia', { n: fmt.n(estimate.media.count - mediaDone), size: formatBytes(estimate.media.bytes), done: fmt.n(mediaDone) }) }}</li>
+          <li v-else-if="!form.no_media && !catalogPartial">{{ t('export.planMediaNone') }}</li>
           <li>{{ t('export.planWhere') }}</li>
         </ol>
       </section>

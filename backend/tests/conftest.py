@@ -47,8 +47,11 @@ class FakeClient:
         self.get_calls = 0
 
     async def get_messages(self, peer: Any, limit: int | None = None, min_id: int = 0, reverse: bool = False,
-                           ids: Any = None) -> Any:
+                           ids: Any = None, offset_date: Any = None) -> Any:
         self.get_calls += 1
+        if offset_date is not None:  # newest messages strictly before the date
+            before = [m for m in self.messages if m.date.replace(tzinfo=None) < offset_date.replace(tzinfo=None)]
+            return _TotalList(list(reversed(before))[: limit or len(before)])
         if ids is not None:
             if isinstance(ids, list):
                 return [next((m for m in self.messages if m.id == i), None) for i in ids]

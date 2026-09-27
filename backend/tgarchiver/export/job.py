@@ -1,7 +1,9 @@
-"""The `export` job: for each chat sync history -> queue media -> render files; then download media (docs/19 bulk)."""
+"""The `export` job: per chat sync history (media downloads start in parallel) -> render files; then finish media."""
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 from contextlib import AsyncExitStack
 from typing import TYPE_CHECKING, Any
@@ -51,9 +53,27 @@ async def export_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
                     skipped.append(chat["id"])
                     await ctx.save_checkpoint(index=i + 1, skipped=skipped)
                     continue
-                await sync_chat_history(svc, ctx, chat["id"], client=client, progress_prefix=prefix)
+                media_task: asyncio.Task[Any] | None = None
                 if media_types:
-                    await enqueue(svc, [chat["id"]], media_types, filters)
+                    # files start downloading while the history is still coming in, not after it
+                    new_batch = asyncio.Event()
+
+                    async def queue_media(cid: int = chat["id"], ev: asyncio.Event = new_batch) -> None:
+                        await enqueue(svc, [cid], media_types, filters)
+                        ev.set()
+
+                    media_task = asyncio.create_task(_media_worker(svc, ctx, chat["id"], new_batch))
+                try:
+                    await sync_chat_history(svc, ctx, chat["id"], client=client, progress_prefix=prefix,
+                                            since=filters.get("date_from"),
+                                            on_batch=queue_media if media_types else None)
+                    if media_types:
+                        await enqueue(svc, [chat["id"]], media_types, filters)
+                finally:
+                    if media_task:
+                        media_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
+                            await media_task
                 await ctx.progress(stage="render", force=True)
                 for fmt in formats:
                     await Exporter(svc, chat, fmt, split, opts).run(ctx)
@@ -73,6 +93,16 @@ async def export_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
     await ctx.progress(stage="done", force=True)
     svc.bus.emit("chats.changed")
     return {"chats": len(chat_ids), "skipped_protected": skipped, "media": media_result}
+
+
+async def _media_worker(svc: Services, ctx: JobContext, chat_id: int, new_batch: asyncio.Event) -> None:
+    """Download queued files of one chat in the background while its history sync runs."""
+    while True:
+        await new_batch.wait()
+        new_batch.clear()
+        q = MediaQueue(svc, ctx)
+        q.chat_ids = [chat_id]
+        await q.run()
 
 
 async def render_job(svc: Services, ctx: JobContext) -> dict[str, Any]:

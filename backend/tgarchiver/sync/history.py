@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from tgarchiver.core.db import dumps, now_iso
@@ -114,8 +116,14 @@ def _strip_init_data(url: str) -> str:
 
 
 async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, client: Any = None,
-                            progress_prefix: dict[str, Any] | None = None) -> int:
-    """Download all new messages of a chat, oldest first, resuming from sync_state."""
+                            progress_prefix: dict[str, Any] | None = None, since: str | None = None,
+                            on_batch: Callable[[], Awaitable[None]] | None = None) -> int:
+    """Download all new messages of a chat, oldest first, resuming from sync_state.
+
+    ``since`` (YYYY-MM-DD) skips older history: the run starts at that date and does not advance the full-sync
+    checkpoint, so a later full sync still fills the gap. ``on_batch`` runs after each stored batch (e.g. to queue
+    media while history is still downloading).
+    """
     chat = await get_chat(svc, chat_id)
     client = client or await svc.tg.authorized_client()
     me_id = (svc.tg.me or {}).get("id")
@@ -128,6 +136,14 @@ async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, cli
     await svc.db.execute(
         "INSERT INTO sync_state(chat_id, topic_id, last_message_id, done, total, updated_at) VALUES(?,0,?,0,?,?) "
         "ON CONFLICT(chat_id, topic_id) DO UPDATE SET total=excluded.total", (chat_id, last_id, total, now_iso()))
+    partial = False
+    if since and not (state and state["done"]):
+        # newest message before the start date = where this run begins (older history is skipped)
+        before = await svc.tg.call(lambda: client.get_messages(
+            peer, limit=1, offset_date=datetime.fromisoformat(str(since)[:10])))
+        boundary = before[0].id if before else 0
+        if boundary > last_id:
+            last_id, partial = boundary, True
     fields = {**(progress_prefix or {}), "stage": "messages", "chat_id": chat_id, "chat_title": chat["title"],
               "msg_done": have, "msg_total": max(total, have)}
     await ctx.progress(**fields, force=True)
@@ -139,13 +155,17 @@ async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, cli
         batch = [m for m in batch if m is not None and m.id > last_id]
         if not batch:
             break
-        last_id = await store_batch(svc, chat_id, batch, me_id)
+        new_last = await store_batch(svc, chat_id, batch, me_id, checkpoint=not partial)
+        last_id = max(last_id, new_last or max(m.id for m in batch))
         fetched += len(batch)
         await ctx.progress(msg_done=have + fetched, msg_total=max(total, have + fetched))
+        if on_batch:
+            await on_batch()
         if len(batch) < BATCH:
             break
-    await svc.db.execute("UPDATE sync_state SET done=1, updated_at=? WHERE chat_id=? AND topic_id=0",
-                         (now_iso(), chat_id))
+    if not partial:
+        await svc.db.execute("UPDATE sync_state SET done=1, updated_at=? WHERE chat_id=? AND topic_id=0",
+                             (now_iso(), chat_id))
     await refresh_chat_counters(svc, chat_id)
     return fetched
 

@@ -233,6 +233,8 @@ const en: typeof uk = {
     deleteText: 'Folder "{name}" will be deleted. Chats stay in the archive.',
   },
   export: {
+    planFetchPeriod: 'Fetch history from Telegram only for the selected period (older messages are skipped).',
+    planMediaParallel: 'Files start downloading right away, in parallel with the history.',
     whatToSave: 'What to save',
     modeText: 'Messages only',
     modeTextHint: 'Chat text without files - fast',

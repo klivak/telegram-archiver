@@ -230,3 +230,24 @@ async def test_unavailable_file_fails_fast_and_does_not_stall_queue(svc: Service
     rows = {r["message_id"]: r for r in await svc.db.fetchall("SELECT * FROM media")}
     assert rows[1]["status"] == "failed" and rows[1]["attempts"] == 1 and "file_unavailable" in rows[1]["error"]
     assert all(rows[i]["status"] == "done" for i in range(2, 8))
+
+
+async def test_export_with_date_fetches_only_that_period_and_downloads_media_while_syncing(svc: Services) -> None:
+    from conftest import BASE
+
+    await add_chat(svc)
+    msgs = [make_msg(i, days=i, media=make_doc(500 + i, 20, name=f"f{i}.bin")) for i in range(1, 31)]
+    client = FakeClient(msgs, {500 + i: b"q" * 20 for i in range(1, 31)})
+    use_client(svc, client)
+    since = (BASE + __import__("datetime").timedelta(days=21)).date().isoformat()
+    job = await svc.engine.wait(await svc.engine.submit("export", {
+        "chat_ids": [2000], "formats": ["md"], "media_types": ["document"], "filters": {"date_from": since}}),
+        timeout=60)
+    assert job["status"] == "done", job
+    ids = [r["id"] for r in await svc.db.fetchall("SELECT id FROM messages WHERE chat_id=2000 ORDER BY id")]
+    assert ids and ids[0] >= 20 and ids[-1] == 30  # older history was not fetched
+    done = await svc.db.scalar("SELECT count(*) FROM media WHERE status='done'")
+    assert done == len([i for i in ids if i >= 21])
+    # the partial run must not mark the chat as fully synced nor move the checkpoint
+    state = await svc.db.fetchone("SELECT * FROM sync_state WHERE chat_id=2000")
+    assert not state or (not state["done"] and state["last_message_id"] == 0)
