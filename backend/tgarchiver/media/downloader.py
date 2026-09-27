@@ -118,6 +118,10 @@ def _in_window(window: str, now: datetime) -> tuple[bool, int]:
     return False, max(60, wait * 60 - now.second)
 
 
+
+class FileUnavailable(Exception):
+    """Telegram refuses the file even with a fresh file_reference (self-destructing or removed media)."""
+
 class FileStopped(Exception):  # noqa: N818
     """The user paused/cancelled this single file while it was downloading."""
 
@@ -133,6 +137,10 @@ class MediaQueue:
         self.session_total = 0
         self.started = time.monotonic()
         self.chats: dict[int, dict[str, Any]] = {}
+        # media id -> monotonic time before which it must not be retried; kept out of batches instead of sleeping,
+        # so one failing file never stalls the rest of the queue
+        self.retry_at: dict[int, float] = {}
+        self.retry_files: dict[int, float] = {}  # same for the Telegram file, so a duplicate copy waits too
 
     async def _check_schedule(self) -> None:
         s = self.svc.settings
@@ -167,9 +175,19 @@ class MediaQueue:
         if self.chat_ids:
             where += f" AND chat_id IN ({','.join('?' * len(self.chat_ids))})"
             args.extend(self.chat_ids)
-        # Manual "download now" first, then small files before big ones.
+        now = time.monotonic()
+        waiting = [i for i, t in self.retry_at.items() if t > now]
+        if waiting:
+            where += f" AND id NOT IN ({','.join('?' * len(waiting))})"
+            args.extend(waiting)
+        waiting_files = [f for f, t in self.retry_files.items() if t > now]
+        if waiting_files:
+            where += f" AND (tg_file_id IS NULL OR tg_file_id NOT IN ({','.join('?' * len(waiting_files))}))"
+            args.extend(waiting_files)
+        # Manual "download now" first, then partly downloaded files (resume), then small files before big ones.
         return await self.svc.db.fetchall(
-            f"SELECT * FROM media WHERE {where} ORDER BY priority DESC, chat_id, size ASC LIMIT 100", args)
+            f"SELECT * FROM media WHERE {where} "
+            f"ORDER BY priority DESC, (bytes_done > 0) DESC, chat_id, size ASC, id LIMIT 100", args)
 
     async def run(self) -> dict[str, Any]:
         while True:
@@ -177,7 +195,11 @@ class MediaQueue:
             await self._check_schedule()
             batch = await self._next_batch()
             if not batch:
-                break
+                pending = [t for t in (*self.retry_at.values(), *self.retry_files.values()) if t > time.monotonic()]
+                if not pending:
+                    break
+                await asyncio.sleep(min(pending) - time.monotonic())  # only files in backoff are left
+                continue
             by_chat: dict[int, list[dict[str, Any]]] = {}
             for r in batch:
                 by_chat.setdefault(r["chat_id"], []).append(r)
@@ -213,6 +235,8 @@ class MediaQueue:
         for r in rows:
             if await self._try_dedup(chat, r):
                 continue
+            if self.retry_files.get(r["tg_file_id"], 0) > time.monotonic():
+                continue  # its file is in backoff; the copy is retried together with it
             if r["tg_file_id"] in file_ids:
                 continue  # same file already in this round; the copy is hardlinked on the next round
             file_ids.add(r["tg_file_id"])
@@ -228,7 +252,6 @@ class MediaQueue:
         errors_seen: list[BaseException] = []
 
         async def one(r: dict[str, Any]) -> None:
-            backoff = 0.0
             async with sem:
                 if errors_seen:
                     return
@@ -256,8 +279,10 @@ class MediaQueue:
                     raise
                 except Exception as e:  # noqa: BLE001
                     backoff = await self._fail(r, e)
-            if backoff:
-                await asyncio.sleep(backoff)  # outside the semaphore so other downloads keep going
+                    if backoff:
+                        self.retry_at[r["id"]] = time.monotonic() + backoff
+                        if r["tg_file_id"]:
+                            self.retry_files[r["tg_file_id"]] = self.retry_at[r["id"]]
 
         tasks = [asyncio.create_task(one(r)) for r in todo]
         try:
@@ -295,7 +320,7 @@ class MediaQueue:
     async def _fail(self, r: dict[str, Any], e: BaseException) -> float:
         """Record a failed attempt; returns the backoff delay before the next attempt (0 if final)."""
         attempts = r["attempts"] + 1
-        final = attempts >= self.svc.settings.max_retries
+        final = attempts >= self.svc.settings.max_retries or isinstance(e, FileUnavailable)
         log.warning("media %s failed (%s/%s): %s", r["id"], attempts, self.svc.settings.max_retries, type(e).__name__)
         await self.svc.db.execute(
             "UPDATE media SET status=?, attempts=?, error=?, updated_at=? WHERE id=? AND status='downloading'",
@@ -326,9 +351,9 @@ class MediaQueue:
             try:
                 await self._stream(client, msg, part, offset, size, r)
                 break
-            except (errors.FileReferenceExpiredError, errors.FileReferenceInvalidError):
+            except (errors.FileReferenceExpiredError, errors.FileReferenceInvalidError) as e:
                 if refreshed:
-                    raise
+                    raise FileUnavailable("file_unavailable") from e
                 refreshed = True
                 fresh = await self.svc.tg.call(lambda: client.get_messages(peer, ids=r["message_id"]))
                 if fresh is None or fresh.media is None:
@@ -382,6 +407,11 @@ class MediaQueue:
                 fh.flush()
                 await self._persist_progress(r, done)
                 raise FloodWait(e.seconds) from e
+            except Exception:
+                # keep bytes_done in sync with the .part file so the retry resumes this row instead of a copy
+                fh.flush()
+                await self._persist_progress(r, done)
+                raise
             fh.flush()
             await self._persist_progress(r, done, force=True)
 

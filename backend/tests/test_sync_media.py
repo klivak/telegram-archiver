@@ -200,3 +200,32 @@ async def test_chat_preview_fetches_latest_without_moving_checkpoint(svc: Servic
     # the full sync still fetches the whole history from the start
     await sync_chat_history(svc, Ctx(), 2000)  # type: ignore[arg-type]
     assert await svc.db.scalar("SELECT count(*) FROM messages WHERE chat_id=2000") == 251
+
+
+async def test_unavailable_file_fails_fast_and_does_not_stall_queue(svc: Services) -> None:
+    import time as _time
+
+    from telethon import errors
+
+    await add_chat(svc)
+    msgs = [make_msg(1, media=make_doc(31, 10, name="gone.bin"))] + [
+        make_msg(i, media=make_doc(100 + i, 50, name=f"f{i}.bin")) for i in range(2, 8)]
+    client = FakeClient(msgs, {100 + i: b"z" * 50 for i in range(2, 8)})
+    orig = client.iter_download
+
+    def iter_download(media, **kw):  # type: ignore[no-untyped-def]
+        if media.id == 31:
+            raise errors.FileReferenceExpiredError(request=None)
+        return orig(media, **kw)
+
+    client.iter_download = iter_download  # type: ignore[method-assign]
+    use_client(svc, client)
+    await sync_chat_history(svc, Ctx(), 2000)  # type: ignore[arg-type]
+    await enqueue(svc, [2000], ["document"], {})
+    t0 = _time.monotonic()
+    job = await svc.engine.wait(await svc.engine.submit("download_media", {"chat_ids": [2000]}), timeout=30)
+    assert job["status"] == "done"
+    assert _time.monotonic() - t0 < 5  # no retry backoff spent on a file that can't be downloaded
+    rows = {r["message_id"]: r for r in await svc.db.fetchall("SELECT * FROM media")}
+    assert rows[1]["status"] == "failed" and rows[1]["attempts"] == 1 and "file_unavailable" in rows[1]["error"]
+    assert all(rows[i]["status"] == "done" for i in range(2, 8))
