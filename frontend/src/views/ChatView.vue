@@ -45,11 +45,14 @@ async function loadChat() {
 
 async function loadLatest() {
   loading.value = true
-  const r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { limit: PAGE, ...query.value })
-  items.value = r.items
-  reachedTop.value = r.items.length < PAGE
-  reachedBottom.value = true
-  loading.value = false
+  try {
+    const r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { limit: PAGE, ...query.value })
+    items.value = r.items
+    reachedTop.value = r.items.length < PAGE
+    reachedBottom.value = true
+  } finally {
+    loading.value = false
+  }
   await nextTick()
   if (scroller.value) scroller.value.scrollTop = scroller.value.scrollHeight
 }
@@ -59,7 +62,13 @@ async function loadOlder() {
   loading.value = true
   const el = scroller.value!
   const prevHeight = el.scrollHeight
-  const r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { before: items.value[0].id, limit: PAGE, ...query.value })
+  let r: { items: Message[] }
+  try {
+    r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { before: items.value[0].id, limit: PAGE, ...query.value })
+  } finally {
+    loading.value = false
+  }
+  loading.value = true
   reachedTop.value = r.items.length < PAGE
   let next = [...r.items, ...items.value]
   if (next.length > MAX_IN_DOM) {
@@ -75,7 +84,13 @@ async function loadOlder() {
 async function loadNewer() {
   if (loading.value || reachedBottom.value || !items.value.length) return
   loading.value = true
-  const r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { after: items.value[items.value.length - 1].id, limit: PAGE, ...query.value })
+  let r: { items: Message[] }
+  try {
+    r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { after: items.value[items.value.length - 1].id, limit: PAGE, ...query.value })
+  } finally {
+    loading.value = false
+  }
+  loading.value = true
   reachedBottom.value = r.items.length < PAGE
   let next = [...items.value, ...r.items]
   if (next.length > MAX_IN_DOM) {
@@ -92,11 +107,15 @@ async function loadNewer() {
 
 async function jumpTo(params: Record<string, unknown>, highlight?: number) {
   loading.value = true
-  const r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { limit: PAGE * 2, ...query.value, ...params })
+  let r: { items: Message[] }
+  try {
+    r = await api.get<{ items: Message[] }>(`/chats/${chatId.value}/messages`, { limit: PAGE * 2, ...query.value, ...params })
+  } finally {
+    loading.value = false
+  }
   items.value = r.items
   reachedTop.value = false
   reachedBottom.value = false
-  loading.value = false
   await nextTick()
   const target = highlight ?? (params.around as number | undefined) ?? r.items[Math.floor(r.items.length / 2)]?.id
   const el = document.getElementById(`m${target}`)

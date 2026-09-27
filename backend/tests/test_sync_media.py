@@ -163,3 +163,18 @@ async def test_out_of_order_writes_do_not_move_checkpoint(svc: Services) -> None
     assert await svc.db.fetchone("SELECT * FROM sync_state WHERE chat_id=2000") is None
     use_client(svc, FakeClient(msgs))
     assert await sync_chat_history(svc, Ctx(), 2000) == 10  # type: ignore[arg-type]
+
+
+async def test_resync_with_changed_file_requeues_downloaded_media(svc: Services) -> None:
+    from tgarchiver.sync.history import store_batch
+
+    await add_chat(svc)
+    await store_batch(svc, 2000, [make_msg(1, media=make_doc(11, 10, name="a.bin"))], None)
+    await svc.db.execute("UPDATE media SET status='done', sha256='x', bytes_done=10")
+    await store_batch(svc, 2000, [make_msg(1, media=make_doc(11, 10, name="a.bin"))], None)
+    row = await svc.db.fetchone("SELECT * FROM media")
+    assert row["status"] == "done" and row["sha256"] == "x"  # same file: untouched
+    await store_batch(svc, 2000, [make_msg(1, media=make_doc(99, 20, name="b.bin"))], None)
+    row = await svc.db.fetchone("SELECT * FROM media")
+    assert row["status"] == "pending" and row["sha256"] is None and row["bytes_done"] == 0
+    assert row["file_name"] == "b.bin" and row["size"] == 20

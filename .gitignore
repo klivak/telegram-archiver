@@ -33,3 +33,6 @@ build/
 .env
 .env.*
 !.env.example
+
+# private spec/notes (separate repo)
+docs/

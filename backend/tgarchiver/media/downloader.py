@@ -227,8 +227,13 @@ class MediaQueue:
         errors_seen: list[BaseException] = []
 
         async def one(r: dict[str, Any]) -> None:
+            backoff = 0.0
             async with sem:
                 if errors_seen:
+                    return
+                wait = self.svc.tg.flood_until - time.monotonic()
+                if wait > 0:  # account-wide FloodWait from another request: don't hit Telegram until it passes
+                    errors_seen.append(FloodWait(int(wait) + 1))
                     return
                 # Atomic claim: another queue (export job vs. download job) may be working on the same scope.
                 claimed = await self.svc.db.execute(
@@ -241,13 +246,17 @@ class MediaQueue:
                 except FileStopped:
                     pass  # the row already carries the user's paused/skipped status
                 except (FloodWait, JobPaused, Deferred) as e:
+                    if isinstance(e, FloodWait):
+                        self.svc.tg.flood_until = max(self.svc.tg.flood_until, time.monotonic() + e.seconds)
                     errors_seen.append(e)
                     await self._release(r)
                 except asyncio.CancelledError:
                     await self._release(r)
                     raise
                 except Exception as e:  # noqa: BLE001
-                    await self._fail(r, e)
+                    backoff = await self._fail(r, e)
+            if backoff:
+                await asyncio.sleep(backoff)  # outside the semaphore so other downloads keep going
 
         tasks = [asyncio.create_task(one(r)) for r in todo]
         try:
@@ -282,15 +291,15 @@ class MediaQueue:
     async def _release(self, r: dict[str, Any]) -> None:
         await self.svc.db.execute("UPDATE media SET status='pending' WHERE id=? AND status='downloading'", (r["id"],))
 
-    async def _fail(self, r: dict[str, Any], e: BaseException) -> None:
+    async def _fail(self, r: dict[str, Any], e: BaseException) -> float:
+        """Record a failed attempt; returns the backoff delay before the next attempt (0 if final)."""
         attempts = r["attempts"] + 1
         final = attempts >= self.svc.settings.max_retries
         log.warning("media %s failed (%s/%s): %s", r["id"], attempts, self.svc.settings.max_retries, type(e).__name__)
         await self.svc.db.execute(
             "UPDATE media SET status=?, attempts=?, error=?, updated_at=? WHERE id=? AND status='downloading'",
             ("failed" if final else "pending", attempts, f"{type(e).__name__}: {e}"[:300], now_iso(), r["id"]))
-        if not final:
-            await asyncio.sleep(min(2 ** attempts, 30))
+        return 0.0 if final else float(min(2 ** attempts, 30))
 
     async def _download_one(self, client: Any, peer: Any, chat: dict[str, Any], r: dict[str, Any],
                             msg: Any) -> None:

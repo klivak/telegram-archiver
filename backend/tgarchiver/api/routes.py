@@ -50,6 +50,7 @@ async def auth_status(request: Request) -> dict[str, Any]:
 @router.post("/auth/config")
 async def auth_config(request: Request, body: ConfigIn) -> dict[str, Any]:
     svc = S(request)
+    await svc.auth.cancel_qr()  # the running QR loop belongs to the old client
     svc.settings.api_id = body.api_id
     svc.secrets.set(API_HASH_KEY, body.api_hash.lower())
     svc.save_settings()

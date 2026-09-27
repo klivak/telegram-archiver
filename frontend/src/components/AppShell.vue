@@ -3,7 +3,7 @@ import { NAlert, NBadge, NButton, NLayout, NLayoutContent, NLayoutSider, NMenu, 
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterView, useRoute, useRouter } from 'vue-router'
-import { events } from '@/api/client'
+import { ApiError, events } from '@/api/client'
 import { useAppStore } from '@/stores/app'
 import { useChatsStore } from '@/stores/chats'
 import { useJobsStore } from '@/stores/jobs'
@@ -93,10 +93,20 @@ async function onKey(e: KeyboardEvent) {
   }
 }
 
+// Last-resort handler: a failed API call in any view shows a translated message instead of failing silently.
+function onRejection(e: PromiseRejectionEvent) {
+  if (!(e.reason instanceof ApiError)) return
+  e.preventDefault()
+  const r = e.reason
+  if (r.status === 401) app.loadAuth()
+  else message.error(r.status === 422 ? t('common.invalid') : t('common.failed'))
+}
+
 let offs: (() => void)[] = []
 onMounted(() => {
   boot()
   window.addEventListener('keydown', onKey)
+  window.addEventListener('unhandledrejection', onRejection)
   offs = [
     events.on('notification', (ev) => {
       const code = ev.data?.code as string
@@ -110,6 +120,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKey)
+  window.removeEventListener('unhandledrejection', onRejection)
   offs.forEach((f) => f())
 })
 
@@ -127,7 +138,7 @@ async function retryBackend() {
 <template>
   <div v-if="booting" style="height: 100%; display: grid; place-items: center"><NSpin size="large" /></div>
   <div v-else-if="app.backendDown" style="height: 100%; display: grid; place-items: center">
-    <NResult status="warning" :title="t('app.backendDownTitle')" :description="t('app.backendDownText')">
+    <NResult status="warning" :title="app.tokenInvalid ? t('app.tokenInvalidTitle') : t('app.backendDownTitle')" :description="app.tokenInvalid ? t('app.tokenInvalidText') : t('app.backendDownText')">
       <template #footer><NButton type="primary" @click="retryBackend">{{ t('common.retry') }}</NButton></template>
     </NResult>
   </div>

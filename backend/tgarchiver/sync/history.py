@@ -76,7 +76,14 @@ async def store_batch(svc: Services, chat_id: int, messages: list[Any], me_id: i
             await c.executemany(
                 "INSERT INTO media(chat_id, message_id, tg_file_id, type, mime, size, file_name, duration, date, "
                 "updated_at, status) VALUES(?,?,?,?,?,?,?,?,?,?,'available') ON CONFLICT(chat_id, message_id) DO "
-                "UPDATE SET tg_file_id=excluded.tg_file_id, size=excluded.size",
+                "UPDATE SET tg_file_id=excluded.tg_file_id, size=excluded.size, "
+                # edited message with a different file: re-queue it if the old one was already fetched
+                "status=CASE WHEN media.tg_file_id IS NOT excluded.tg_file_id AND media.status IN ('done','failed') "
+                "THEN 'pending' ELSE media.status END, "
+                "bytes_done=CASE WHEN media.tg_file_id IS NOT excluded.tg_file_id THEN 0 ELSE media.bytes_done END, "
+                "sha256=CASE WHEN media.tg_file_id IS NOT excluded.tg_file_id THEN NULL ELSE media.sha256 END, "
+                "attempts=CASE WHEN media.tg_file_id IS NOT excluded.tg_file_id THEN 0 ELSE media.attempts END, "
+                "type=excluded.type, mime=excluded.mime, file_name=excluded.file_name, duration=excluded.duration",
                 media_rows,
             )
         for app, m in apps:

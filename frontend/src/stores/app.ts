@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { api, events } from '@/api/client'
+import { api, ApiError, events } from '@/api/client'
 import type { AuthStatus, Settings } from '@/api/types'
 import { i18n, setLocale } from '@/i18n'
 
@@ -10,6 +10,8 @@ export const useAppStore = defineStore('app', () => {
   const modules = ref<{ whisper: boolean; playwright: boolean; cryptg: boolean }>({ whisper: false, playwright: false, cryptg: false })
   const wsConnected = ref(false)
   const backendDown = ref(false)
+  /** The backend answers but rejects our token (server restarted with a new one). */
+  const tokenInvalid = ref(false)
   const tutorialOpen = ref(false)
   const paletteOpen = ref(false)
   const update = ref<{ available: boolean; latest: string | null; url?: string } | null>(null)
@@ -21,8 +23,10 @@ export const useAppStore = defineStore('app', () => {
     try {
       auth.value = await api.get<AuthStatus>('/auth/status')
       backendDown.value = false
-    } catch {
+      tokenInvalid.value = false
+    } catch (e) {
       backendDown.value = true
+      tokenInvalid.value = e instanceof ApiError && e.status === 401
     }
   }
 
@@ -49,7 +53,11 @@ export const useAppStore = defineStore('app', () => {
   }
 
   function init() {
-    events.onStatus = (c) => (wsConnected.value = c)
+    events.onStatus = (c) => {
+      wsConnected.value = c
+      // Lost the event stream: find out whether the server is gone or restarted with a new token (shows the matching screen).
+      if (!c) loadAuth()
+    }
     events.connect()
     events.on('auth.ready', () => loadAuth())
     events.on('reconnected', () => loadAuth())
@@ -57,5 +65,5 @@ export const useAppStore = defineStore('app', () => {
 
   const locale = computed(() => (i18n.global.locale as unknown as { value: string }).value)
 
-  return { auth, settings, modules, wsConnected, backendDown, tutorialOpen, paletteOpen, update, ready, advanced, locale, loadAuth, loadSettings, saveSettings, loadModules, checkUpdates, init }
+  return { auth, settings, modules, wsConnected, backendDown, tokenInvalid, tutorialOpen, paletteOpen, update, ready, advanced, locale, loadAuth, loadSettings, saveSettings, loadModules, checkUpdates, init }
 })

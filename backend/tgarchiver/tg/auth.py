@@ -12,7 +12,7 @@ import qrcode
 import qrcode.image.svg
 from telethon import errors
 
-from tgarchiver.tg.client import TelegramService
+from tgarchiver.tg.client import NotAuthorized, TelegramService
 
 log = logging.getLogger(__name__)
 
@@ -36,14 +36,23 @@ def qr_svg(data: str) -> str:
 def _map_error(e: Exception) -> AuthError:
     if isinstance(e, errors.FloodWaitError):
         return AuthError("flood_wait", e.seconds)
+    if isinstance(e, AuthError):
+        return e
+    if isinstance(e, NotAuthorized):
+        return AuthError("need_config")
     table: list[tuple[type[Exception], str]] = [
         (errors.PhoneCodeInvalidError, "code_invalid"),
+        (errors.PhoneCodeEmptyError, "code_invalid"),
         (errors.PhoneCodeExpiredError, "code_expired"),
+        (errors.PhoneNumberUnoccupiedError, "phone_unoccupied"),
+        (errors.PhoneNumberFloodError, "phone_flood"),
         (errors.PasswordHashInvalidError, "password_invalid"),
         (errors.PhoneNumberInvalidError, "phone_invalid"),
         (errors.PhoneNumberBannedError, "phone_banned"),
         (errors.ApiIdInvalidError, "api_id_invalid"),
         (errors.AuthKeyUnregisteredError, "session_revoked"),
+        (ConnectionError, "network"),
+        (OSError, "network"),
     ]
     for cls, code in table:
         if isinstance(e, cls):
@@ -94,8 +103,8 @@ class AuthService:
     # ---------- QR ----------
     async def start_qr(self) -> dict[str, Any]:
         await self.cancel_qr()
-        client = await self.tg.get_client()
         try:
+            client = await self.tg.get_client()
             qr = await client.qr_login()
         except Exception as e:  # noqa: BLE001
             raise _map_error(e) from e
@@ -118,7 +127,8 @@ class AuthService:
                 try:
                     await qr.recreate()
                 except Exception as e:  # noqa: BLE001
-                    self.tg.bus.emit("auth.error", {"code": _map_error(e).code})
+                    err = _map_error(e)
+                    self.tg.bus.emit("auth.error", {"code": err.code, "seconds": err.seconds})
                     return
                 self.tg.bus.emit("auth.qr", self._qr_payload(qr))
             except errors.SessionPasswordNeededError:
@@ -155,8 +165,8 @@ class AuthService:
     # ---------- phone ----------
     async def send_code(self, phone: str) -> dict[str, Any]:
         await self.cancel_qr()
-        client = await self.tg.get_client()
         try:
+            client = await self.tg.get_client()
             sent = await client.send_code_request(phone)
         except Exception as e:  # noqa: BLE001
             raise _map_error(e) from e
@@ -168,24 +178,29 @@ class AuthService:
     async def verify_code(self, code: str) -> dict[str, Any]:
         if not self._phone:
             raise AuthError("no_phone")
-        client = await self.tg.get_client()
         try:
+            client = await self.tg.get_client()
             await client.sign_in(phone=self._phone, code=code, phone_code_hash=self._phone_code_hash)
         except errors.SessionPasswordNeededError:
             await self._need_password()
             return {"state": "password", "hint": self.password_hint}
         except Exception as e:  # noqa: BLE001
             raise _map_error(e) from e
-        await self._finish()
+        try:
+            await self._finish()
+        except Exception as e:  # noqa: BLE001
+            raise _map_error(e) from e
         return {"state": "ready"}
 
     async def password(self, password: str) -> dict[str, Any]:
-        client = await self.tg.get_client()
+        if self.state != "password":
+            raise AuthError("no_phone")  # e.g. the server restarted mid-login: start again
         try:
+            client = await self.tg.get_client()
             await client.sign_in(password=password)
+            await self._finish()
         except Exception as e:  # noqa: BLE001
             raise _map_error(e) from e
-        await self._finish()
         return {"state": "ready"}
 
     async def logout(self) -> None:

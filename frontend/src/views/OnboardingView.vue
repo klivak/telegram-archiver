@@ -7,7 +7,7 @@ import type { AuthStatus } from '@/api/types'
 import { setLocale } from '@/i18n'
 import { useAppStore } from '@/stores/app'
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const app = useAppStore()
 const apiId = ref<number | null>(app.auth?.api_id ?? null)
 const apiHash = ref('')
@@ -20,6 +20,7 @@ const password = ref('')
 const stage = ref<'config' | 'login' | 'password'>(app.auth?.configured ? 'login' : 'config')
 const method = ref<'qr' | 'phone'>('qr')
 const codeSent = ref(false)
+const qrFailed = ref(false)
 const hint = ref<string | null>(null)
 const waitLeft = ref(0)
 let waitTimer: ReturnType<typeof setInterval> | undefined
@@ -35,8 +36,12 @@ function showError(e: unknown) {
       error.value = ''
       return
     }
-    error.value = d?.code ? t(`auth.errors.${d.code}`) : String(e.message)
-  } else error.value = String(e)
+    error.value = errorText(d?.code)
+  } else error.value = t('auth.errors.unknown')
+}
+
+function errorText(code?: string) {
+  return code && te(`auth.errors.${code}`) ? t(`auth.errors.${code}`) : t('auth.errors.unknown')
 }
 
 function startWait(s: number) {
@@ -66,9 +71,11 @@ async function startQr() {
   method.value = 'qr'
   error.value = ''
   qr.value = null
+  qrFailed.value = false
   try {
     qr.value = await api.post('/auth/qr/start')
   } catch (e) {
+    qrFailed.value = true
     showError(e)
   }
 }
@@ -95,7 +102,7 @@ async function verifyCode() {
     if (r.state === 'password') {
       stage.value = 'password'
       hint.value = r.hint ?? null
-    }
+    } else await app.loadAuth() // do not depend on the WS auth.ready event alone
   } catch (e) {
     showError(e)
   } finally {
@@ -109,6 +116,7 @@ async function sendPassword() {
   try {
     await api.post('/auth/password', { password: password.value })
     password.value = ''
+    await app.loadAuth()
   } catch (e) {
     showError(e)
   } finally {
@@ -125,8 +133,10 @@ onMounted(() => {
       hint.value = ev.data?.hint ?? null
     }),
     events.on('auth.error', (ev) => {
+      qr.value = null // the QR loop on the server has stopped; offer a retry
+      qrFailed.value = true
       if (ev.data?.code === 'flood_wait') startWait(ev.data.seconds)
-      else error.value = t(`auth.errors.${ev.data?.code ?? 'unknown'}`)
+      else error.value = errorText(ev.data?.code)
     }),
     events.on('auth.ready', () => app.loadAuth()),
   ]
@@ -184,6 +194,7 @@ function toggleLang() {
         <NTabPane name="qr" :tab="t('onboarding.qrTab')">
           <div class="qr">
             <div v-if="qr" class="qr-img" v-html="qr.svg"></div>
+            <NButton v-else-if="qrFailed" :disabled="waitLeft > 0" @click="startQr">{{ t('common.retry') }}</NButton>
             <NSpin v-else />
             <ol class="howto">
               <li>{{ t('onboarding.qrStep1') }}</li>
@@ -196,11 +207,11 @@ function toggleLang() {
         <NTabPane name="phone" :tab="t('onboarding.phoneTab')">
           <NForm v-if="!codeSent" @submit.prevent="sendCode">
             <NFormItem :label="t('onboarding.phone')"><NInput v-model:value="phone" placeholder="+380..." /></NFormItem>
-            <NButton type="primary" block :loading="busy" :disabled="phone.length < 7" attr-type="submit">{{ t('onboarding.sendCode') }}</NButton>
+            <NButton type="primary" block :loading="busy" :disabled="phone.length < 7 || waitLeft > 0" attr-type="submit">{{ t('onboarding.sendCode') }}</NButton>
           </NForm>
           <NForm v-else @submit.prevent="verifyCode">
             <NFormItem :label="t('onboarding.code')" :feedback="t('onboarding.codeHint')"><NInput v-model:value="code" placeholder="12345" /></NFormItem>
-            <NButton type="primary" block :loading="busy" :disabled="code.length < 4" attr-type="submit">{{ t('onboarding.signIn') }}</NButton>
+            <NButton type="primary" block :loading="busy" :disabled="code.length < 4 || waitLeft > 0" attr-type="submit">{{ t('onboarding.signIn') }}</NButton>
             <NButton quaternary block style="margin-top: 6px" @click="codeSent = false">{{ t('onboarding.resend') }}</NButton>
           </NForm>
         </NTabPane>
@@ -213,7 +224,7 @@ function toggleLang() {
         <NFormItem :label="t('onboarding.password')" :feedback="hint ? t('onboarding.hint', { hint }) : ''">
           <NInput v-model:value="password" type="password" show-password-on="click" />
         </NFormItem>
-        <NButton type="primary" block :loading="busy" :disabled="!password" attr-type="submit">{{ t('onboarding.signIn') }}</NButton>
+        <NButton type="primary" block :loading="busy" :disabled="!password || waitLeft > 0" attr-type="submit">{{ t('onboarding.signIn') }}</NButton>
       </NForm>
     </NCard>
 
