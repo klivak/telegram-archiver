@@ -92,16 +92,25 @@ def create_app(svc: Services, token: str, static_dir: Path | None = None, *, man
             svc.bus.unsubscribe(q)
 
     if static_dir and (static_dir / "index.html").exists():
-        index_html = (static_dir / "index.html").read_text(encoding="utf-8")
-        injected = index_html.replace("<head>", f'<head><script>window.__TGA_TOKEN__="{token}"</script>', 1)
+        index_file = static_dir / "index.html"
+        cache: dict[str, Any] = {"mtime": None, "html": ""}
+
+        def injected() -> str:
+            # Re-read after a frontend rebuild, otherwise the page would reference deleted hashed assets.
+            mtime = index_file.stat().st_mtime
+            if cache["mtime"] != mtime:
+                html = index_file.read_text(encoding="utf-8")
+                cache["html"] = html.replace("<head>", f'<head><script>window.__TGA_TOKEN__="{token}"</script>', 1)
+                cache["mtime"] = mtime
+            return str(cache["html"])
 
         @app.get("/{path:path}", include_in_schema=False)
         async def spa(path: str) -> Any:
-            if path.startswith(("api/", "ws/")):
-                raise HTTPException(404)
+            if path.startswith(("api/", "ws/", "assets/")) and not (static_dir / path).is_file():
+                raise HTTPException(404)  # a missing hashed asset must not get index.html (wrong MIME, blank page)
             f = (static_dir / path).resolve()
             if path and f.is_file() and static_dir.resolve() in f.parents:
                 return FileResponse(f)
-            return HTMLResponse(injected, headers={"Cache-Control": "no-store"})
+            return HTMLResponse(injected(), headers={"Cache-Control": "no-store"})
 
     return app

@@ -80,3 +80,11 @@ mark {
     background-position: -200% 0;
   }
 }
+
+a {
+  color: var(--tga-blue);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}

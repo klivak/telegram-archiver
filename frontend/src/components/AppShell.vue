@@ -146,7 +146,7 @@ async function retryBackend() {
   <NLayout v-else has-sider style="height: 100%">
     <NLayoutSider bordered collapse-mode="width" :collapsed-width="64" :width="220" :collapsed="collapsed" show-trigger @collapse="collapsed = true" @expand="collapsed = false" :native-scrollbar="false">
       <div class="brand" :class="{ collapsed }" @click="router.push('/')">
-        <img src="/logo.svg" alt="" width="32" height="32" />
+        <img src="/logo.png" alt="" width="32" height="32" />
         <span v-if="!collapsed">Telegram Archiver</span>
       </div>
       <NMenu :value="activeKey" :options="menu" :collapsed="collapsed" :collapsed-width="64" @update:value="(k: string) => router.push({ name: k })" data-tour="nav" />

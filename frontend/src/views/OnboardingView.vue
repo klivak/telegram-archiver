@@ -155,7 +155,7 @@ function toggleLang() {
 <template>
   <div class="wrap">
     <div class="head">
-      <img src="/logo.svg" width="48" height="48" alt="" />
+      <img src="/logo.png" width="48" height="48" alt="" />
       <div class="grow">
         <h1>Telegram Archiver</h1>
         <div class="muted">{{ t('onboarding.tagline') }}</div>
