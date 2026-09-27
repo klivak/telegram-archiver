@@ -42,3 +42,14 @@ def test_export_estimate_reports_all_types(ctx) -> None:
     assert r.status_code == 200
     body = r.json()
     assert "all_types" in body and "messages_total" in body
+
+
+def test_whisper_status_and_test_endpoint(ctx, monkeypatch) -> None:
+    import tgarchiver.transcribe.whisper as wh
+
+    c, svc, _ = ctx
+    r = c.get("/api/whisper/status")
+    assert r.status_code == 200 and {"installed", "cuda_devices", "models", "voice_done"} <= r.json().keys()
+    monkeypatch.setattr(wh, "available", lambda: True)
+    r = c.post("/api/whisper/test")
+    assert r.status_code == 400 and r.json()["detail"]["code"] == "no_voice_downloaded"

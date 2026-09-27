@@ -37,14 +37,43 @@ def _worker_transcribe(path: str, model: str, device: str, compute_type: str, be
     global _MODEL, _MODEL_KEY
     from faster_whisper import WhisperModel  # heavy import, only in the worker
 
-    key = (model, device, compute_type)
-    if _MODEL is None or _MODEL_KEY != key:
-        _MODEL = WhisperModel(model, device=device, compute_type=compute_type, download_root=cache_dir)
-        _MODEL_KEY = key
-    segments, info = _MODEL.transcribe(path, beam_size=beam, language=None if language == "auto" else language,
-                                       vad_filter=True)
-    segs = [(float(s.start), float(s.end), s.text.strip()) for s in segments]
-    return {"lang": info.language, "segments": segs}
+    def run(dev: str, ctype: str) -> dict[str, Any]:
+        global _MODEL, _MODEL_KEY
+        key = (model, dev, ctype)
+        if _MODEL is None or _MODEL_KEY != key:
+            _MODEL = WhisperModel(model, device=dev, compute_type=ctype, download_root=cache_dir)
+            _MODEL_KEY = key
+        segments, info = _MODEL.transcribe(path, beam_size=beam, language=None if language == "auto" else language,
+                                           vad_filter=True)
+        segs = [(float(s.start), float(s.end), s.text.strip()) for s in segments]
+        return {"lang": info.language, "segments": segs, "device": dev}
+
+    try:
+        return run(device, compute_type)
+    except (RuntimeError, OSError) as e:
+        # GPU present but CUDA/cuBLAS/cuDNN libraries missing (common on Windows): fall back to the CPU
+        msg = str(e).lower()
+        if device == "cpu" or not any(k in msg for k in ("cuda", "cublas", "cudnn", "dll", "library")):
+            raise
+        _MODEL = None
+        return run("cpu", "int8")
+
+
+def status() -> dict[str, Any]:
+    """Module installed, CUDA devices seen by CTranslate2, and models already downloaded (no model is loaded)."""
+    out: dict[str, Any] = {"installed": available(), "cuda_devices": 0, "models": []}
+    if out["installed"]:
+        try:
+            import ctranslate2
+
+            out["cuda_devices"] = int(ctranslate2.get_cuda_device_count())
+        except Exception:  # noqa: BLE001
+            pass
+    cache = local_data_dir() / "whisper-models"
+    if cache.exists():
+        out["models"] = sorted(p.name.removeprefix("models--Systran--faster-whisper-") for p in cache.iterdir()
+                               if p.is_dir() and p.name.startswith("models--"))
+    return out
 
 
 def srt_time(t: float) -> str:
@@ -158,7 +187,7 @@ async def transcribe_job(svc: Services, ctx: JobContext, params: dict[str, Any] 
             "INSERT OR REPLACE INTO transcripts(media_id, lang, model, text, txt_path, srt_path, created_at) "
             "VALUES(?,?,?,?,?,?,?)", (row["id"], res["lang"], svc.settings.whisper.model, text, str(txt), str(srt),
                                       now_iso()))
-        svc.bus.emit("transcript.done", {"media_id": row["id"], "chat_id": row["chat_id"]})
+        svc.bus.emit("transcript.done", {"media_id": row["id"], "chat_id": row["chat_id"], "device": res.get("device")})
         chats.add(row["chat_id"])
         done += 1
     for cid in chats:

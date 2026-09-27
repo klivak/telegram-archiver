@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { NAlert, NButton, NCode, NDivider, NForm, NFormItem, NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSwitch, NTabPane, NTabs, NTimePicker, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NDivider, NForm, NFormItem, NInput, NInputNumber, NRadioButton, NRadioGroup, NSelect, NSwitch, NTabPane, NTabs, NTimePicker, useDialog, useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { api } from '@/api/client'
+import WhisperGuide from '@/components/WhisperGuide.vue'
 import type { Settings } from '@/api/types'
 import { useAppStore } from '@/stores/app'
 import { useChatsStore } from '@/stores/chats'
@@ -174,9 +175,7 @@ const keyName = computed(() => (form.value ? `ai_key_${form.value.ai.provider}` 
       </NTabPane>
 
       <NTabPane name="whisper" :tab="t('settings.tabs.whisper')">
-        <NAlert v-if="!app.modules.whisper" type="info" :title="t('settings.whisperInstall')" style="margin-bottom: 12px; max-width: 720px">
-          <NCode code="cd backend; uv sync --extra whisper" language="powershell" />
-        </NAlert>
+        <WhisperGuide :enabled="form.whisper.enabled" :model="form.whisper.model" @enable="form.whisper.enabled = true; save()" />
         <NForm label-placement="left" label-width="240" style="max-width: 720px">
           <NFormItem :label="t('settings.whisperEnabled')"><NSwitch v-model:value="form.whisper.enabled" /></NFormItem>
           <NFormItem :label="t('settings.whisperModel')" :feedback="t('settings.whisperModelHint')"><NSelect v-model:value="form.whisper.model" :options="whisperModels" /></NFormItem>

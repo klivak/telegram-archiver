@@ -840,6 +840,49 @@ async def transcribe(request: Request, media_ids: list[int] = Body([]), chat_id:
     return {"job_id": await S(request).engine.submit("transcribe", params, title="transcribe")}
 
 
+@router.get("/whisper/status")
+async def whisper_status(request: Request) -> dict[str, Any]:
+    import asyncio
+
+    from tgarchiver.transcribe.whisper import status
+
+    svc = S(request)
+    st = await asyncio.to_thread(status)
+    counts = await svc.db.fetchone(
+        "SELECT (SELECT count(*) FROM media WHERE type IN ('voice','round')) AS voice, "
+        "(SELECT count(*) FROM media WHERE type IN ('voice','round') AND status='done') AS voice_done, "
+        "(SELECT count(*) FROM transcripts) AS transcribed")
+    return {**st, **(counts or {})}
+
+
+@router.post("/whisper/test")
+async def whisper_test(request: Request) -> dict[str, Any]:
+    """Transcribe the shortest downloaded voice message to check that Whisper works end to end."""
+    from tgarchiver.transcribe.whisper import available
+
+    svc = S(request)
+    if not available():
+        raise HTTPException(400, {"code": "whisper_not_installed"})
+    row = await svc.db.fetchone(
+        "SELECT d.id FROM media d LEFT JOIN transcripts t ON t.media_id=d.id WHERE d.type IN ('voice','round') "
+        "AND d.status='done' ORDER BY (t.media_id IS NOT NULL), coalesce(d.duration, 9999) LIMIT 1")
+    if not row:
+        raise HTTPException(400, {"code": "no_voice_downloaded"})
+    await svc.db.execute("DELETE FROM transcripts WHERE media_id=?", (row["id"],))
+    job_id = await svc.engine.submit("transcribe", {"media_ids": [row["id"]]}, title="transcribe")
+    return {"job_id": job_id, "media_id": row["id"]}
+
+
+@router.get("/transcripts/{media_id}")
+async def get_transcript(request: Request, media_id: int) -> dict[str, Any]:
+    row = await S(request).db.fetchone(
+        "SELECT t.*, d.duration, d.chat_id, c.title AS chat_title FROM transcripts t JOIN media d ON d.id=t.media_id "
+        "LEFT JOIN chats c ON c.id=d.chat_id WHERE t.media_id=?", (media_id,))
+    if not row:
+        raise HTTPException(404)
+    return row
+
+
 # ------------------------------------------------------------------ monitor + AI
 @router.get("/monitor/unread")
 async def monitor_unread(request: Request) -> dict[str, Any]:
