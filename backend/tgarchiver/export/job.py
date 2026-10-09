@@ -55,6 +55,7 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
     start = int(ctx.checkpoint.get("index", 0))
     skipped: list[int] = list(ctx.checkpoint.get("skipped", []))
     no_access: list[int] = list(ctx.checkpoint.get("no_access", []))
+    exported = int(ctx.checkpoint.get("exported", 0))
 
     if phase == "chats":
         async with AsyncExitStack() as stack:
@@ -108,11 +109,13 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
                     chat_ids.insert(i + 1, old)  # the old group holds the history from before the upgrade
                     await ctx.save_checkpoint(chat_ids=chat_ids)
                 await ctx.progress(stage="render", force=True)
-                for fmt in formats:
-                    await Exporter(svc, chat, fmt, split, opts).run(ctx)
+                for k, fmt in enumerate(formats):
+                    res = await Exporter(svc, chat, fmt, split, opts).run(ctx)
+                    if k == 0:
+                        exported += res["messages"]
                     if p.get("also_full") and split.get("mode") != "single":
                         await export_full_file(svc, chat, fmt, opts)
-                await ctx.save_checkpoint(index=i + 1, skipped=skipped)
+                await ctx.save_checkpoint(index=i + 1, skipped=skipped, exported=exported)
         await ctx.save_checkpoint(phase="media", index=len(chat_ids))
     await ctx.progress(chats_done=len(chat_ids), chats_total=len(chat_ids), force=True)
 
@@ -126,7 +129,8 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
         media_result = await q.run()
     await ctx.progress(stage="done", force=True)
     svc.bus.emit("chats.changed")
-    return {"chats": len(chat_ids), "skipped_protected": skipped, "no_access": no_access, "media": media_result}
+    return {"chats": len(chat_ids), "messages": exported, "skipped_protected": skipped, "no_access": no_access,
+            "media": media_result}
 
 
 async def _media_worker(svc: Services, ctx: JobContext, chat_id: int, new_batch: asyncio.Event,

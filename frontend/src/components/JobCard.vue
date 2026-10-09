@@ -181,7 +181,7 @@ function openFolder() {
       </div>
     </template>
     <div v-else-if="job.status === 'done' && isExport" class="summary small">
-      ✅ {{ t('jobs.doneSummary', { n: fmt.n(p.msg_total ?? p.msg_done ?? 0) }) }}<template v-if="p.bytes_total"> · {{ t('jobs.doneFiles', { size: formatBytes(p.bytes_done ?? p.bytes_total) }) }}</template>
+      ✅ {{ t('jobs.doneSummary', { n: fmt.n(result?.messages ?? p.msg_total ?? p.msg_done ?? 0) }) }}<template v-if="p.bytes_total"> · {{ t('jobs.doneFiles', { size: formatBytes(p.bytes_done ?? p.bytes_total) }) }}</template>
     </div>
 
     <div v-if="waitLeft" class="notice warn small">⏳ {{ t('flood.short', { s: waitLeft }) }}</div>

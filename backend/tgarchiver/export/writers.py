@@ -148,13 +148,14 @@ class TxtWriter(Writer):
             self.fh.write("\n".join(self.header_lines()) + "\n\n")
 
     def write(self, m: dict[str, Any]) -> None:
-        self.count += 1
         if self.opts.get("text_only"):
             # just the message text: no header, date, name, media or service lines
             text = "" if m.get("service_action") else (m.get("text") or "").strip()
             if text:
+                self.count += 1
                 self.fh.write(text + "\n\n")
             return
+        self.count += 1
         ts = (m["date"] or "")[:16].replace("T", " ")
         body = service_text(m) if m.get("service_action") else (m.get("text") or "")
         note = media_note(m)
