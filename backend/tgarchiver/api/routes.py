@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -331,6 +332,11 @@ async def chat_avatar(request: Request, chat_id: int) -> Any:
     if not path.exists():
         from tgarchiver.sync.dialogs import input_peer
 
+        # avatars are cosmetic: never spend the request budget on them during a FloodWait or a history download
+        busy = await svc.db.scalar("SELECT count(*) FROM jobs WHERE kind IN ('export','sync_history') "
+                                   "AND status IN ('running','flood_wait')")
+        if busy or svc.tg.flood_until > time.monotonic():
+            raise HTTPException(404)
         try:
             client = await svc.tg.authorized_client()
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -355,6 +361,7 @@ class ExportIn(BaseModel):
     filters: dict[str, Any] = {}
     also_full: bool = False
     include_transcripts: bool = True
+    text_only: bool = False
     takeout: bool | None = None
     title: str = ""
 

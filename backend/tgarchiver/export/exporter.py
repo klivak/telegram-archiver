@@ -121,7 +121,7 @@ class Exporter:
         return {"parts": []}
 
     def _opts_key(self) -> str:
-        keys = ("date_from", "date_to", "topic_id", "include_transcripts")
+        keys = ("date_from", "date_to", "topic_id", "include_transcripts", "text_only")
         return json.dumps({k: self.opts.get(k) for k in keys}, sort_keys=True)
 
     async def run(self, ctx: JobContext | None = None) -> dict[str, Any]:

@@ -31,6 +31,7 @@ const defaults = (): ExportRequest => ({
   filters: { date_from: null, date_to: null, max_size_mb: null, from: null, extensions: [] },
   also_full: false,
   include_transcripts: true,
+  text_only: false,
   takeout: null,
 })
 const form = ref<ExportRequest>(defaults())
@@ -225,6 +226,7 @@ const fromSel = computed({
         <div class="xw-pills">
           <button v-for="f in FORMATS" :key="f" type="button" class="xw-pill" :class="{ on: form.formats.includes(f) }" @click="toggleFormat(f)">{{ t(`formats.${f}`) }}</button>
         </div>
+        <NCheckbox v-if="form.formats.includes('txt')" v-model:checked="form.text_only" style="margin-top: 10px">{{ t('export.textOnly') }}</NCheckbox>
       </section>
 
       <section class="xw-card" data-tour="export-split">

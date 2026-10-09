@@ -129,6 +129,7 @@ export interface ExportRequest {
   filters: { date_from?: string | null; date_to?: string | null; max_size_mb?: number | null; from?: 'me' | 'others' | null; extensions?: string[] }
   also_full: boolean
   include_transcripts: boolean
+  text_only?: boolean
   takeout?: boolean | null
 }
 

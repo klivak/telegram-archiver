@@ -45,7 +45,7 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
     split: dict[str, Any] = p.get("split") or {"mode": "month"}
     media_types: list[str] = [] if p.get("no_media") else list(p.get("media_types") or [])
     filters: dict[str, Any] = p.get("filters") or {}
-    opts = {"include_transcripts": p.get("include_transcripts", True),
+    opts = {"include_transcripts": p.get("include_transcripts", True), "text_only": p.get("text_only", False),
             "date_from": filters.get("date_from"), "date_to": filters.get("date_to"), "topic_id": p.get("topic_id")}
     phase = ctx.checkpoint.get("phase", "chats")
     start = int(ctx.checkpoint.get("index", 0))
@@ -84,7 +84,7 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
                     media_task = asyncio.create_task(_media_worker(svc, ctx, chat["id"], new_batch, media_types))
                 try:
                     await sync_chat_history(svc, ctx, chat["id"], client=client, progress_prefix=prefix,
-                                            since=filters.get("date_from"),
+                                            since=filters.get("date_from"), until=filters.get("date_to"),
                                             on_batch=queue_media if media_types else None)
                     if media_types:
                         await enqueue(svc, [chat["id"]], media_types, filters)

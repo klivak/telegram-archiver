@@ -96,3 +96,19 @@ def test_untrusted_files_are_sandboxed(tmp_path: Path) -> None:
         r = c.get("/api/archive-file", params={"path": str(evil), "token": "t"})
         assert r.status_code == 200
         assert r.headers["content-security-policy"] == "sandbox"
+
+
+def test_txt_text_only_writes_just_message_text() -> None:
+    import io
+
+    from tgarchiver.export.writers import TxtWriter
+
+    fh = io.StringIO()
+    w = TxtWriter(fh, {"chat_title": "Chat", "noforwards": True}, {"text_only": True})
+    w.begin()
+    w.write({"date": "2026-07-01T10:00:00", "first_name": "Ann", "text": "hello", "media_type": "photo", "raw": {}})
+    w.write({"date": "2026-07-01T10:01:00", "service_action": "ChatJoin", "text": "", "raw": {}})
+    w.write({"date": "2026-07-01T10:02:00", "first_name": "Bob", "text": "", "media_type": "photo", "raw": {}})
+    w.write({"date": "2026-07-01T10:03:00", "first_name": "Bob", "text": "line 1\nline 2", "raw": {}})
+    w.end()
+    assert fh.getvalue() == "hello\n\nline 1\nline 2\n\n"

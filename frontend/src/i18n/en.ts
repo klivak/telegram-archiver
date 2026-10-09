@@ -269,6 +269,7 @@ const en: typeof uk = {
     tokens: 'tokens',
     overlap: 'overlap',
     alsoFull: 'Also build one full file',
+    textOnly: 'TXT: message text only (no names, dates or media)',
     dates: 'Dates',
     maxSize: 'Max file size',
     from: 'Whose messages',

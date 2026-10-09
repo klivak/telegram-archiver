@@ -118,12 +118,13 @@ def _strip_init_data(url: str) -> str:
 
 async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, client: Any = None,
                             progress_prefix: dict[str, Any] | None = None, since: str | None = None,
+                            until: str | None = None,
                             on_batch: Callable[[], Awaitable[None]] | None = None) -> int:
     """Download all new messages of a chat, oldest first, resuming from sync_state.
 
     ``since`` (YYYY-MM-DD) skips older history: the run starts at that date and does not advance the full-sync
-    checkpoint, so a later full sync still fills the gap. ``on_batch`` runs after each stored batch (e.g. to queue
-    media while history is still downloading).
+    checkpoint, so a later full sync still fills the gap. ``until`` (YYYY-MM-DD) stops once that date is passed.
+    ``on_batch`` runs after each stored batch (e.g. to queue media while history is still downloading).
     """
     chat = await get_chat(svc, chat_id)
     client = client or await svc.tg.authorized_client()
@@ -138,17 +139,23 @@ async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, cli
         "INSERT INTO sync_state(chat_id, topic_id, last_message_id, done, total, updated_at) VALUES(?,0,?,0,?,?) "
         "ON CONFLICT(chat_id, topic_id) DO UPDATE SET total=excluded.total", (chat_id, last_id, total, now_iso()))
     partial = False
+    # a date-limited run keeps its own position in the job checkpoint, so a FloodWait/restart resumes it
+    partial_pos: dict[str, int] = dict((getattr(ctx, "checkpoint", None) or {}).get("partial_last") or {})
     if since and not (state and state["done"]):
-        # newest message before the start date = where this run begins (older history is skipped)
-        before = await svc.tg.call(lambda: client.get_messages(
-            peer, limit=1, offset_date=datetime.fromisoformat(str(since)[:10])))
-        boundary = before[0].id if before else 0
+        boundary = partial_pos.get(str(chat_id))
+        if boundary is None:
+            # newest message before the start date = where this run begins (older history is skipped)
+            before = await svc.tg.call(lambda: client.get_messages(
+                peer, limit=1, offset_date=datetime.fromisoformat(str(since)[:10])))
+            boundary = before[0].id if before else 0
         if boundary > last_id:
             last_id, partial = boundary, True
+    stop_after = f"{str(until)[:10]}T23:59:59" if until else None
     fields = {**(progress_prefix or {}), "stage": "messages", "chat_id": chat_id, "chat_title": chat["title"],
               "msg_done": have, "msg_total": max(total, have)}
     await ctx.progress(**fields, force=True)
     fetched = 0
+    stopped_early = False
     while True:
         await ctx.check()
         batch = await svc.tg.call(
@@ -159,12 +166,18 @@ async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, cli
         new_last = await store_batch(svc, chat_id, batch, me_id, checkpoint=not partial)
         last_id = max(last_id, new_last or max(m.id for m in batch))
         fetched += len(batch)
+        if partial:
+            partial_pos[str(chat_id)] = last_id
+            await ctx.save_checkpoint(partial_last=partial_pos)
         await ctx.progress(msg_done=have + fetched, msg_total=max(total, have + fetched))
         if on_batch:
             await on_batch()
         if len(batch) < BATCH:
             break
-    if not partial:
+        if stop_after and batch[-1].date and batch[-1].date.isoformat() > stop_after:
+            stopped_early = True  # past the end date: newer history is not needed for this export
+            break
+    if not partial and not stopped_early:
         await svc.db.execute("UPDATE sync_state SET done=1, updated_at=? WHERE chat_id=? AND topic_id=0",
                              (now_iso(), chat_id))
     await refresh_chat_counters(svc, chat_id)
