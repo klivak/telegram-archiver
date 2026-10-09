@@ -20,6 +20,10 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# the account lost access to the chat (left, banned, private): skip it, keep exporting the rest
+NO_ACCESS = (errors.ChannelPrivateError, errors.ChatForbiddenError, errors.ChannelInvalidError,
+             errors.ChatIdInvalidError, errors.PeerIdInvalidError, errors.UserBannedInChannelError)
+
 
 async def export_job(svc: Services, ctx: JobContext) -> dict[str, Any]:
     try:
@@ -50,6 +54,7 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
     phase = ctx.checkpoint.get("phase", "chats")
     start = int(ctx.checkpoint.get("index", 0))
     skipped: list[int] = list(ctx.checkpoint.get("skipped", []))
+    no_access: list[int] = list(ctx.checkpoint.get("no_access", []))
 
     if phase == "chats":
         async with AsyncExitStack() as stack:
@@ -88,6 +93,11 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
                                             on_batch=queue_media if media_types else None)
                     if media_types:
                         await enqueue(svc, [chat["id"]], media_types, filters)
+                except NO_ACCESS as e:
+                    log.warning("export: no access to chat %s (%s), skipped", chat["id"], type(e).__name__)
+                    no_access.append(chat["id"])
+                    await ctx.save_checkpoint(index=i + 1, no_access=no_access)
+                    continue
                 finally:
                     if media_task:
                         media_task.cancel()
@@ -107,7 +117,7 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
     await ctx.progress(chats_done=len(chat_ids), chats_total=len(chat_ids), force=True)
 
     media_result: dict[str, Any] = {}
-    targets = [c for c in chat_ids if c not in skipped]
+    targets = [c for c in chat_ids if c not in skipped and c not in no_access]
     if media_types and targets:
         await ctx.progress(stage="media", force=True)
         q = MediaQueue(svc, ctx)
@@ -116,7 +126,7 @@ async def _export(svc: Services, ctx: JobContext) -> dict[str, Any]:
         media_result = await q.run()
     await ctx.progress(stage="done", force=True)
     svc.bus.emit("chats.changed")
-    return {"chats": len(chat_ids), "skipped_protected": skipped, "media": media_result}
+    return {"chats": len(chat_ids), "skipped_protected": skipped, "no_access": no_access, "media": media_result}
 
 
 async def _media_worker(svc: Services, ctx: JobContext, chat_id: int, new_batch: asyncio.Event,

@@ -286,6 +286,7 @@ export default {
     start: 'Почати експорт',
     started: 'Експорт запущено - прогрес у «Завантаженнях».',
     skippedProtected: 'Пропущено захищених чатів: {n}',
+    skippedNoAccess: 'Пропущено чатів без доступу (приватні або вас видалили): {n}',
   },
   formats: { md: 'Markdown', txt: 'TXT', json: 'JSON', jsonl: 'JSONL', html: 'HTML', csv: 'CSV' },
   split: { month: 'Місяць', single: 'Один файл', day: 'День', week: 'Тиждень', year: 'Рік', size: 'Розмір', topic: 'Топік', llm: 'Для LLM' },

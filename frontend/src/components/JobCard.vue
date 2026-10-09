@@ -188,6 +188,7 @@ function openFolder() {
     <div v-if="p.deferred" class="notice small">⏸ {{ t(`jobs.deferred.${p.deferred}`) }}</div>
     <div v-if="job.error && job.status === 'failed'" class="notice err small">{{ job.error }}</div>
     <div v-if="job.status === 'done' && result?.skipped_protected?.length" class="notice warn small">{{ t('export.skippedProtected', { n: result.skipped_protected.length }) }}</div>
+    <div v-if="job.status === 'done' && result?.no_access?.length" class="notice warn small">{{ t('export.skippedNoAccess', { n: result.no_access.length }) }}</div>
 
     <div v-if="paramChips.length && !compact" class="chips">
       <span v-for="c in paramChips" :key="c" class="pchip small">{{ c }}</span>

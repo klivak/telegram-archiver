@@ -287,6 +287,7 @@ const en: typeof uk = {
     start: 'Start export',
     started: 'Export started - progress is in Downloads.',
     skippedProtected: 'Protected chats skipped: {n}',
+    skippedNoAccess: 'Chats skipped with no access (private or you were removed): {n}',
   },
   formats: { md: 'Markdown', txt: 'TXT', json: 'JSON', jsonl: 'JSONL', html: 'HTML', csv: 'CSV' },
   split: { month: 'Month', single: 'One file', day: 'Day', week: 'Week', year: 'Year', size: 'Size', topic: 'Topic', llm: 'For LLM' },
