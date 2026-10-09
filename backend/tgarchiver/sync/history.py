@@ -144,6 +144,13 @@ async def sync_chat_history(svc: Services, ctx: JobContext, chat_id: int, *, cli
     if since and not (state and state["done"]):
         boundary = partial_pos.get(str(chat_id))
         if boundary is None:
+            # an earlier (cancelled/failed) export with the same or earlier start date already fetched up to here
+            prev = await svc.db.scalar(
+                "SELECT max(CAST(json_extract(checkpoint, '$.partial_last.\"' || ? || '\"') AS INTEGER)) FROM jobs "
+                "WHERE kind='export' AND json_extract(params, '$.filters.date_from') <= ?",
+                (str(chat_id), str(since)[:10]))
+            boundary = int(prev) if prev else None
+        if boundary is None:
             # newest message before the start date = where this run begins (older history is skipped)
             before = await svc.tg.call(lambda: client.get_messages(
                 peer, limit=1, offset_date=datetime.fromisoformat(str(since)[:10])))
